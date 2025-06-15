@@ -7,6 +7,25 @@ This project implements a Deep Q-Learning (DQN) agent to play Super Mario Bros u
 ### Prerequisites
 - Python 3.11
 - pip (Python package installer)
+- NVIDIA GPU (recommended for faster training)
+
+### PyTorch with CUDA Installation
+
+For optimal performance, it's recommended to install PyTorch with CUDA support:
+
+1. Visit the official PyTorch website: https://pytorch.org/get-started/locally/
+2. Select your preferences:
+   - PyTorch Build: Stable
+   - Your OS: Windows/Linux/Mac
+   - Package: Pip
+   - Language: Python
+   - Compute Platform: CUDA (select your CUDA version)
+3. Copy and run the provided installation command. For example:
+```bash
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+Note: Make sure to install PyTorch with CUDA before installing other requirements.
 
 ### Installation
 
