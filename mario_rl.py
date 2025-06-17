@@ -20,39 +20,43 @@ mp.set_start_method('spawn', force=True)
 
 # maximum size of the queue where collector processes store replays,
 # the limit is for when the collector threads outpace the main thread
-REP_Q_SIZE = 20000
+REP_Q_SIZE = 1000
 
 # the size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 200000
+BUFFER_SIZE = 1500000
 
 # on how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 10000
 
 # if an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 25
+DEADLOCK_STEPS = 80
 
-# the amount of steps a run can last at max
-MAX_STEPS_PER_RUN = 1200
+# the amount of steps a run can last at max (0 for unlimited)
+MAX_STEPS_PER_RUN = 0
 
 # the batch size for the agents policy training
-BATCH_SIZE = 256
+BATCH_SIZE = 4096
 
 # the amount of batches we train per epoch
-EPISODES_PER_EPOCH = 40
+EPISODES_PER_EPOCH = 2
+
+LEARNING_RATE = 0.00005
 
 # interval at which the model will be saved
-SAVE_INTERVAL = 10
+SAVE_INTERVAL = 100
 
+EPSILON_START = 1
 # how much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.001
+EPSILON_DECAY = 0.0003
 
-EPSILON_MIN = 0.01
+EPSILON_MIN = 0.1
 
 # gamma describes how much the agent should look for future rewards vs immediate ones.
 # gamma = 1 future rewards are as valuable as immediate ones
 # gamma = 0 only immediate rewards matter
-GAMMA = 0.9
+GAMMA = 0.99
+
 
 def save_checkpoint(agent, epoch, checkpoint_dir='checkpoints'):
     """Save the agent's state and training progress."""
@@ -109,87 +113,101 @@ def find_latest_checkpoint(checkpoint_dir='checkpoints'):
 
 # this function will be run by each collector process
 def collector_process(experience_queue, model_queue, stop_event, epsilon, id, queue_lock):
-    env = create_env()
-    print(f"[Collector {id}] Environment created successfully")
-    
-    # Initialize model with minimal memory footprint
-    with torch.no_grad():
-        local_model = DQN((128, 128), env.action_space.n).to(DEVICE)
-        local_model.eval()  # Set to evaluation mode to reduce memory usage
-    print(f"[Collector {id}] Local model initialized")
-
-    # Initialize reward tracking
-    import time
-    recent_rewards = deque(maxlen=100)  # Store last 100 episode rewards
-    last_print_time = time.time()
-    print_interval = 20  # Print every 10 seconds
-
-    # respond to stop event from parent process
-    episode_count = 0
-    best_reward = 0
-    while not stop_event.is_set():
-        state = env.reset()
-        done = False
-        total_reward = 0
-        steps = 0
-
-        while not done and not stop_event.is_set():
-            # check for random update of model weights and epsilon
-            try:
-                if not model_queue.empty():
-                    weights, new_epsilon = model_queue.get_nowait()
-                    local_model.load_state_dict(weights)
-                    epsilon = new_epsilon
-                    print(f"[Collector {id}] Model weights and epsilon updated successfully. New epsilon: {epsilon:.2f}")
-            except Empty:
-                pass
-
-            # Epsilon-greedy action selection
-            if random.random() <= epsilon:
-                action = env.action_space.sample()
-            else:
-                with torch.no_grad():  # Disable gradient calculation
-                    state_tensor = torch.FloatTensor(state).unsqueeze(0).to(DEVICE)
-                    q_values = local_model(state_tensor)
-                    action = q_values.argmax().item()
-
-            # Take action and send experience
-            next_state, reward, done, info = env.step(action)
-            
-            # Acquire lock before putting experience in queue
-            with queue_lock:
-                experience_queue.put((state, action, reward, next_state, done))
-
-            if experience_queue.qsize() > REP_Q_SIZE: print(f"[Collector {id}] experience queue full...")
-            while experience_queue.qsize() > REP_Q_SIZE:
-                sleep(2)
-
-            state = next_state
-            total_reward += reward
-            steps += 1
-
-            if steps >= MAX_STEPS_PER_RUN:  # Max steps per episode
-                done = True
-
-        # update best reward
-        if total_reward > best_reward:
-            best_reward = total_reward
-
-        # Store episode reward and update statistics
-        recent_rewards.append(total_reward)
-        episode_count += 1
+    try:
+        env = create_env()
+        print(f"[Collector {id}] Environment created successfully")
         
-        # Print statistics periodically
-        current_time = time.time()
-        if current_time - last_print_time >= print_interval:
-            avg_reward = sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0
-            print(f"[Collector {id}] Episode {episode_count} - Average reward (last {len(recent_rewards)} episodes): {avg_reward:.2f} - Total best reward: {best_reward:.2f}")
-            last_print_time = current_time
+        # Initialize model with minimal memory footprint
+        with torch.no_grad():
+            local_model = DQN((128, 128), env.action_space.n).to(DEVICE)
+            local_model.eval()  # Set to evaluation mode to reduce memory usage
+        print(f"[Collector {id}] Local model initialized")
 
-    print(f"[Collector {id}] Process stopping due to stop event")
+        # Initialize reward tracking
+        import time
+        recent_rewards = deque(maxlen=100)  # Store last 100 episode rewards
+        last_print_time = time.time()
+        print_interval = 20  # Print every 10 seconds
+
+        # respond to stop event from parent process
+        episode_count = 0
+        best_reward = 0
+        while not stop_event.is_set():
+            try:
+                state = env.reset()
+                done = False
+                total_reward = 0
+                steps = 0
+
+                while not done and not stop_event.is_set():
+                    try:
+                        # check for random update of model weights and epsilon
+                        if not model_queue.empty():
+                            weights, new_epsilon = model_queue.get_nowait()
+                            local_model.load_state_dict(weights)
+                            epsilon = new_epsilon
+                            print(f"[Collector {id}] Model weights and epsilon updated successfully. New epsilon: {epsilon:.2f}")
+                    except Empty:
+                        pass
+                    except Exception as e:
+                        print(f"[Collector {id}] Error updating model: {str(e)}")
+
+                    # Epsilon-greedy action selection
+                    if random.random() <= epsilon:
+                        action = env.action_space.sample()
+                    else:
+                        with torch.no_grad():  # Disable gradient calculation
+                            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(DEVICE)
+                            q_values = local_model(state_tensor)
+                            action = q_values.argmax().item()
+
+                    # Take action and send experience
+                    next_state, reward, done, info = env.step(action)
+                    
+                    # Acquire lock before putting experience in queue
+                    with queue_lock:
+                        experience_queue.put((state, action, reward, next_state, done))
+
+                    if experience_queue.qsize() > REP_Q_SIZE: print(f"[Collector {id}] experience queue full...")
+                    while experience_queue.qsize() > REP_Q_SIZE:
+                        sleep(2)
+
+                    state = next_state
+                    total_reward += reward
+                    steps += 1
+
+                    if MAX_STEPS_PER_RUN != 0 and steps >= MAX_STEPS_PER_RUN:  # Max steps per episode
+                        done = True
+
+                # update best reward
+                if total_reward > best_reward:
+                    best_reward = total_reward
+
+                # Store episode reward and update statistics
+                recent_rewards.append(total_reward)
+                episode_count += 1
+                
+                # Print statistics periodically
+                current_time = time.time()
+                if current_time - last_print_time >= print_interval:
+                    avg_reward = sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0
+                    print(f"[Collector {id}] Episode {episode_count} - Average reward (last {len(recent_rewards)} episodes): {avg_reward:.2f} - Total best reward: {best_reward:.2f}")
+                    last_print_time = current_time
+
+            except Exception as e:
+                print(f"[Collector {id}] Error in episode loop: {str(e)}")
+                continue
+
+        print(f"[Collector {id}] Process stopping due to stop event")
+    except Exception as e:
+        print(f"[Collector {id}] Fatal error: {str(e)}")
+        print(f"[Collector {id}] Process stopping due to error")
+    finally:
+        if 'env' in locals():
+            env.close()
 
 
-def wait_for_buffer(agent, experience_queue, min_buffer_size=REP_Q_SIZE/4):
+def wait_for_buffer(agent, experience_queue, min_buffer_size=BUFFER_SIZE/8):
     """Wait until the replay buffer has enough samples, processing experiences while waiting."""
     last_print_time = time.time()
     print_interval = 5  # Print status every 5 seconds
@@ -220,7 +238,7 @@ def main():
     queue_lock = Lock()  # Create a lock for the queue
 
     # Initialize agent
-    agent = MarioAgent((128, 128), env.action_space.n, experience_queue, memory_size=BUFFER_SIZE, gamma=GAMMA, epsilon_decay=EPSILON_DECAY, epsilon_min=0.3)
+    agent = MarioAgent((128, 128), env.action_space.n, experience_queue, memory_size=BUFFER_SIZE, gamma=GAMMA, epsilon_decay=EPSILON_DECAY, epsilon_min=EPSILON_MIN, lr=LEARNING_RATE, epsilon=EPSILON_START)
 
     # Try to load the latest checkpoint
     start_epoch = 0
@@ -230,7 +248,7 @@ def main():
         print(f"Resuming training from epoch {start_epoch}")
 
     # Spawning collector processes to continuously collect memories
-    num_collectors = 2
+    num_collectors = 8
     collectors = []
 
     # Start collector processes
@@ -269,6 +287,11 @@ def main():
             if processed > 0:
                 print(f"[MAIN] Processed {processed} experiences from queue")
 
+            # Check if we have enough samples for training
+            if len(agent.memory.buffer) < BATCH_SIZE:
+                print(f"[MAIN] Not enough samples for training (have {len(agent.memory.buffer)}, need {BATCH_SIZE})")
+                continue
+
             print("[MAIN] Training agent...")
             agent.replay(batch_size=BATCH_SIZE, episodes=EPISODES_PER_EPOCH)
 
@@ -276,8 +299,7 @@ def main():
             if epoch % 1 == 0:  # Send updates every 1 epochs
                 for _ in range(num_collectors):
                     model_queue.put((agent.q_network.state_dict(), agent.epsilon))
-            with agent.memory.lock:
-                print(f"Replay buffer size: {len(agent.memory.buffer)}")
+            print(f"Replay buffer size: {len(agent.memory.buffer)}")
 
             # Save checkpoint
             if epoch % SAVE_INTERVAL == 0 and epoch != 0:  # Save every 10 epochs
@@ -285,6 +307,8 @@ def main():
 
     except KeyboardInterrupt:
         print("\nStopping training...")
+    except Exception as e:
+        print(f"[MAIN] Error during training: {str(e)}")
     finally:
         # Cleanup
         stop_event.set()

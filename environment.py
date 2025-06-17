@@ -56,6 +56,30 @@ class SkipFrame(gym.Wrapper):
         return obs, total_reward, done, info
 
 
+class ScoreRewardWrapper(gym.Wrapper):
+    def __init__(self, env, score_reward_scale=0.1):
+        super().__init__(env)
+        self.score_reward_scale = score_reward_scale
+        self.last_score = 0
+
+    def reset(self, **kwargs):
+        self.last_score = 0
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        state, reward, done, info = self.env.step(action)
+        
+        # Calculate score reward
+        current_score = info.get('score', 0)
+        score_reward = (current_score - self.last_score) * self.score_reward_scale
+        self.last_score = current_score
+        
+        # Add score reward to the original reward
+        reward += score_reward
+        
+        return state, reward, done, info
+
+
 class DeadlockEnv(gym.Wrapper):
     def __init__(self, env, threshold=10):
         super().__init__(env)
@@ -65,43 +89,59 @@ class DeadlockEnv(gym.Wrapper):
         self.lifes = 3
         self.stage = 1
         self.world = 1
+        self.last_y_pos = 0  # Track vertical position
+        self.position_tolerance = 2  # Small tolerance for position changes
 
     def reset(self, **kwargs):
         self.last_x_pos = 0
+        self.last_y_pos = 0
         self.count = 0
         return self.env.reset(**kwargs)
 
     def step(self, action):
         state, reward, done, info = self.env.step(action)
         x_pos = info['x_pos']
+        y_pos = info['y_pos']
 
-        if x_pos <= self.last_x_pos:
+        # Check if Mario is actually stuck (not moving horizontally)
+        # Allow for small position changes due to game physics
+        is_stuck = abs(x_pos - self.last_x_pos) < self.position_tolerance
+        
+        # Don't count as stuck if Mario is moving vertically (jumping)
+        if is_stuck and abs(y_pos - self.last_y_pos) > self.position_tolerance:
+            is_stuck = False
+
+        if is_stuck:
             self.count += 1
         else:
             self.count = 0
             self.last_x_pos = x_pos
+            self.last_y_pos = y_pos
 
+        # Reset counter when life/stage/world changes
         if info['life'] != self.lifes or info["stage"] != self.stage or info["world"] != self.world:
             self.last_x_pos = x_pos
+            self.last_y_pos = y_pos
             self.count = 0
             self.lifes = info['life']
             self.stage = info["stage"]
             self.world = info["world"]
 
-        if self.count >= self.threshold:
-            reward = -15  # Penalty for getting stuck
+        if self.count >= self.threshold or info["life"] < 2:
+            reward = -60  # Penalty for getting stuck
             done = True
 
         return state, reward, done, info
 
 
-def create_env(deadlock_steps=10):
+def create_env(deadlock_steps=10, random_stages=True):
     """Create and wrap a Mario environment with all necessary wrappers."""
-    env = gym_super_mario_bros.make('SuperMarioBros-v0')
+    env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0' if random_stages else 'SuperMarioBros-v0')
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = GrayScaleObservation(env)
     env = ResizeObservation(env, 128)
     env = SkipFrame(env, skip=4)
     env = FrameStack(env, 4)
+    env = ScoreRewardWrapper(env)  # Add score reward wrapper
     env = DeadlockEnv(env, threshold=deadlock_steps)
     return env 
