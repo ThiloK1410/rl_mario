@@ -1,4 +1,5 @@
 import warnings
+
 from _queue import Empty
 warnings.filterwarnings("ignore")
 
@@ -9,6 +10,7 @@ import os
 from multiprocessing import Queue, Event, Lock
 from multiprocessing import Process
 import torch.multiprocessing as mp
+import pandas as pd
 
 import torch
 from collections import deque
@@ -17,20 +19,21 @@ from environment import create_env
 from dqn_agent import DQN, SharedReplayBuffer, MarioAgent, DEVICE
 
 mp.set_start_method('spawn', force=True)
+DATA_FILE = "training_log.csv"
 
 # maximum size of the queue where collector processes store replays,
 # the limit is for when the collector threads outpace the main thread
-REP_Q_SIZE = 1000
+REP_Q_SIZE = 3000
 
 # the size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 1500000
+BUFFER_SIZE = 1000000
 
 # on how many epochs we want to train, this is basically forever
-NUM_EPOCHS = 10000
+NUM_EPOCHS = 20000
 
 # if an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 80
+DEADLOCK_STEPS = 50
 
 # the amount of steps a run can last at max (0 for unlimited)
 MAX_STEPS_PER_RUN = 0
@@ -39,23 +42,23 @@ MAX_STEPS_PER_RUN = 0
 BATCH_SIZE = 4096
 
 # the amount of batches we train per epoch
-EPISODES_PER_EPOCH = 2
+EPISODES_PER_EPOCH = 6
 
-LEARNING_RATE = 0.00005
+LEARNING_RATE = 0.001
 
 # interval at which the model will be saved
 SAVE_INTERVAL = 100
 
-EPSILON_START = 1
+EPSILON_START = 0.9
 # how much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.0003
+EPSILON_DECAY = 0.003
 
 EPSILON_MIN = 0.1
 
 # gamma describes how much the agent should look for future rewards vs immediate ones.
 # gamma = 1 future rewards are as valuable as immediate ones
 # gamma = 0 only immediate rewards matter
-GAMMA = 0.99
+GAMMA = 0.95
 
 
 def save_checkpoint(agent, epoch, checkpoint_dir='checkpoints'):
@@ -111,12 +114,27 @@ def find_latest_checkpoint(checkpoint_dir='checkpoints'):
     return os.path.join(checkpoint_dir, latest_checkpoint)
 
 
+def write_log(epoch, data_dict):
+    """Appends a dictionary of metrics to a CSV file."""
+    # Add the epoch to the dictionary
+    data_dict['epoch'] = epoch
+
+    # Check if the file already exists
+    file_exists = os.path.exists(DATA_FILE)
+
+    # Create a DataFrame from the dictionary
+    df = pd.DataFrame([data_dict])
+
+    # If the file doesn't exist, write with the header.
+    # Otherwise, append without the header.
+    df.to_csv(DATA_FILE, mode='a', header=not file_exists, index=False)
+
 # this function will be run by each collector process
 def collector_process(experience_queue, model_queue, stop_event, epsilon, id, queue_lock):
     try:
         env = create_env()
         print(f"[Collector {id}] Environment created successfully")
-        
+
         # Initialize model with minimal memory footprint
         with torch.no_grad():
             local_model = DQN((128, 128), env.action_space.n).to(DEVICE)
@@ -163,7 +181,7 @@ def collector_process(experience_queue, model_queue, stop_event, epsilon, id, qu
 
                     # Take action and send experience
                     next_state, reward, done, info = env.step(action)
-                    
+
                     # Acquire lock before putting experience in queue
                     with queue_lock:
                         experience_queue.put((state, action, reward, next_state, done))
@@ -186,7 +204,7 @@ def collector_process(experience_queue, model_queue, stop_event, epsilon, id, qu
                 # Store episode reward and update statistics
                 recent_rewards.append(total_reward)
                 episode_count += 1
-                
+
                 # Print statistics periodically
                 current_time = time.time()
                 if current_time - last_print_time >= print_interval:
@@ -207,11 +225,11 @@ def collector_process(experience_queue, model_queue, stop_event, epsilon, id, qu
             env.close()
 
 
-def wait_for_buffer(agent, experience_queue, min_buffer_size=BUFFER_SIZE/8):
+def wait_for_buffer(agent, experience_queue, min_buffer_size=BUFFER_SIZE/32):
     """Wait until the replay buffer has enough samples, processing experiences while waiting."""
     last_print_time = time.time()
     print_interval = 5  # Print status every 5 seconds
-    
+
     while len(agent.memory.buffer) < min_buffer_size:
         # Process experiences continuously
         try:
@@ -248,7 +266,7 @@ def main():
         print(f"Resuming training from epoch {start_epoch}")
 
     # Spawning collector processes to continuously collect memories
-    num_collectors = 8
+    num_collectors = 6
     collectors = []
 
     # Start collector processes
@@ -293,17 +311,23 @@ def main():
                 continue
 
             print("[MAIN] Training agent...")
-            agent.replay(batch_size=BATCH_SIZE, episodes=EPISODES_PER_EPOCH)
+            lr, avg_reward, loss = agent.replay(batch_size=BATCH_SIZE, episodes=EPISODES_PER_EPOCH)
 
-            # Send updated model to collectors less frequently
-            if epoch % 1 == 0:  # Send updates every 1 epochs
-                for _ in range(num_collectors):
-                    model_queue.put((agent.q_network.state_dict(), agent.epsilon))
+            for _ in range(num_collectors // 2):
+                model_queue.put((agent.q_network.state_dict(), agent.epsilon))
             print(f"Replay buffer size: {len(agent.memory.buffer)}")
 
             # Save checkpoint
             if epoch % SAVE_INTERVAL == 0 and epoch != 0:  # Save every 10 epochs
                 save_checkpoint(agent, epoch)
+
+            log_data = {
+                'average_reward': avg_reward,
+                'loss': loss,
+                'learning_rate': lr,
+                'buffer_size': len(agent.memory.buffer)
+            }
+            write_log(epoch, log_data)
 
     except KeyboardInterrupt:
         print("\nStopping training...")

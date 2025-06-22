@@ -185,6 +185,9 @@ class MarioAgent:
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
 
+        # tau describes the percentage the target network gets nudged to the q-network each step
+        self.tau = 0.002
+
         # Neural networks
         self.q_network = DQN(state_shape, n_actions).to(DEVICE)
         self.target_network = DQN(state_shape, n_actions).to(DEVICE)
@@ -194,8 +197,8 @@ class MarioAgent:
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode='max',  # We want to maximize the reward
-            factor=0.5,  # Reduce LR by half when plateauing
-            patience=40,  # Number of epochs to wait before reducing LR
+            factor=0.5,  # Reduce LR when plateauing
+            patience=20,  # Number of epochs to wait before reducing LR
         )
 
         # Experience replay
@@ -228,6 +231,9 @@ class MarioAgent:
         # Process in smaller chunks to reduce memory usage
         chunk_size = 10  # Process 10 batches at a time
         total_reward = 0  # Track total reward for this replay session
+
+        returned_loss = 0
+        returned_td_error = 0
         
         for chunk_start in range(0, episodes, chunk_size):
             chunk_end = min(chunk_start + chunk_size, episodes)
@@ -264,6 +270,8 @@ class MarioAgent:
                 # Calculate weighted loss
                 loss = (weights * F.mse_loss(current_q_values.squeeze(), target_q_values, reduction='none')).mean()
 
+                returned_loss = loss.item()
+
                 # Train the q-network
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -283,6 +291,14 @@ class MarioAgent:
                 # Update priorities based on TD errors
                 self.memory.update_priorities(indices, td_errors + 1e-6)  # Add small constant to avoid zero priorities
 
+                # instead of doing hard target network updates we use this polyac averaging at each step to get more stable results
+                q_network_params = self.q_network.parameters()
+                target_network_params = self.target_network.parameters()
+                for target_param, q_param in zip(target_network_params, q_network_params):
+                    target_param.data.copy_(
+                        self.tau * q_param.data + (1.0 - self.tau) * target_param.data
+                    )
+
                 # Clear CUDA cache after each batch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -295,9 +311,10 @@ class MarioAgent:
 
         # Update target network after all batches have been processed and epsilon is updated
         self.steps += 1  # Increment steps by the number of episodes trained
-        if self.steps % self.update_target_frequency == 0:
-            self.target_network.load_state_dict(self.q_network.state_dict())
-            
+
+
+
+
         # Update learning rate based on average reward
         avg_reward = total_reward / episodes
         self.scheduler.step(avg_reward)
@@ -305,3 +322,5 @@ class MarioAgent:
         # Print current learning rate
         current_lr = self.optimizer.param_groups[0]['lr']
         print(f"[AGENT] Current learning rate: {current_lr}")
+
+        return current_lr, avg_reward, returned_loss

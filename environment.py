@@ -89,46 +89,35 @@ class DeadlockEnv(gym.Wrapper):
         self.lifes = 3
         self.stage = 1
         self.world = 1
-        self.last_y_pos = 0  # Track vertical position
-        self.position_tolerance = 2  # Small tolerance for position changes
 
     def reset(self, **kwargs):
         self.last_x_pos = 0
-        self.last_y_pos = 0
         self.count = 0
         return self.env.reset(**kwargs)
 
     def step(self, action):
         state, reward, done, info = self.env.step(action)
         x_pos = info['x_pos']
-        y_pos = info['y_pos']
 
-        # Check if Mario is actually stuck (not moving horizontally)
-        # Allow for small position changes due to game physics
-        is_stuck = abs(x_pos - self.last_x_pos) < self.position_tolerance
-        
-        # Don't count as stuck if Mario is moving vertically (jumping)
-        if is_stuck and abs(y_pos - self.last_y_pos) > self.position_tolerance:
-            is_stuck = False
-
-        if is_stuck:
+        if x_pos <= self.last_x_pos:
             self.count += 1
         else:
             self.count = 0
             self.last_x_pos = x_pos
-            self.last_y_pos = y_pos
 
         # Reset counter when life/stage/world changes
         if info['life'] != self.lifes or info["stage"] != self.stage or info["world"] != self.world:
             self.last_x_pos = x_pos
-            self.last_y_pos = y_pos
             self.count = 0
             self.lifes = info['life']
             self.stage = info["stage"]
             self.world = info["world"]
 
-        if self.count >= self.threshold or info["life"] < 2:
-            reward = -60  # Penalty for getting stuck
+        if self.count >= self.threshold:
+            done = True
+
+        if info["life"] < 2:
+            #reward -= 30  # Penalty for dying
             done = True
 
         return state, reward, done, info
@@ -144,4 +133,4 @@ def create_env(deadlock_steps=10, random_stages=True):
     env = FrameStack(env, 4)
     env = ScoreRewardWrapper(env)  # Add score reward wrapper
     env = DeadlockEnv(env, threshold=deadlock_steps)
-    return env 
+    return env
