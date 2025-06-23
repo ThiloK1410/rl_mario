@@ -16,50 +16,14 @@ import torch
 from collections import deque
 
 from environment import create_env
-from dqn_agent import DQN, SharedReplayBuffer, MarioAgent, DEVICE
+from dqn_agent import DQN, MarioAgent, DEVICE
+from config import (
+    DATA_FILE, REP_Q_SIZE, BUFFER_SIZE, NUM_EPOCHS, DEADLOCK_STEPS,
+    MAX_STEPS_PER_RUN, BATCH_SIZE, EPISODES_PER_EPOCH, LEARNING_RATE,
+    SAVE_INTERVAL, EPSILON_START, EPSILON_DECAY, EPSILON_MIN, GAMMA
+)
 
 mp.set_start_method('spawn', force=True)
-DATA_FILE = "training_log.csv"
-
-# maximum size of the queue where collector processes store replays,
-# the limit is for when the collector threads outpace the main thread
-REP_Q_SIZE = 3000
-
-# the size of the replay buffer, where the agent stores its memories,
-# bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 1000000
-
-# on how many epochs we want to train, this is basically forever
-NUM_EPOCHS = 20000
-
-# if an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 50
-
-# the amount of steps a run can last at max (0 for unlimited)
-MAX_STEPS_PER_RUN = 0
-
-# the batch size for the agents policy training
-BATCH_SIZE = 4096
-
-# the amount of batches we train per epoch
-EPISODES_PER_EPOCH = 6
-
-LEARNING_RATE = 0.001
-
-# interval at which the model will be saved
-SAVE_INTERVAL = 100
-
-EPSILON_START = 0.9
-# how much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.003
-
-EPSILON_MIN = 0.1
-
-# gamma describes how much the agent should look for future rewards vs immediate ones.
-# gamma = 1 future rewards are as valuable as immediate ones
-# gamma = 0 only immediate rewards matter
-GAMMA = 0.95
-
 
 def save_checkpoint(agent, epoch, checkpoint_dir='checkpoints'):
     """Save the agent's state and training progress."""
@@ -132,7 +96,7 @@ def write_log(epoch, data_dict):
 # this function will be run by each collector process
 def collector_process(experience_queue, model_queue, stop_event, epsilon, id, queue_lock):
     try:
-        env = create_env()
+        env = create_env(deadlock_steps=DEADLOCK_STEPS)
         print(f"[Collector {id}] Environment created successfully")
 
         # Initialize model with minimal memory footprint
@@ -311,7 +275,7 @@ def main():
                 continue
 
             print("[MAIN] Training agent...")
-            lr, avg_reward, loss = agent.replay(batch_size=BATCH_SIZE, episodes=EPISODES_PER_EPOCH)
+            lr, avg_reward, loss, td_error = agent.replay(batch_size=BATCH_SIZE, episodes=EPISODES_PER_EPOCH)
 
             for _ in range(num_collectors // 2):
                 model_queue.put((agent.q_network.state_dict(), agent.epsilon))
@@ -322,8 +286,9 @@ def main():
                 save_checkpoint(agent, epoch)
 
             log_data = {
-                'average_reward': avg_reward,
+                'td_error': td_error,
                 'loss': loss,
+                'average_reward': avg_reward,
                 'learning_rate': lr,
                 'buffer_size': len(agent.memory.buffer)
             }

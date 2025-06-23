@@ -8,6 +8,8 @@ from collections import deque
 from multiprocessing import Lock, Event
 import bisect
 
+from config import LR_DECAY_RATE, LR_DECAY_FACTOR
+
 # Global device variable
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
@@ -35,7 +37,7 @@ class DQN(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(conv_out_size, 512),
             nn.ReLU(),
-            nn.Dropout(p=0.5), # Added Dropout to regularize the dense layer
+            nn.Dropout(p=0.2), # Added Dropout to regularize the dense layer
             nn.Linear(512, n_actions)
         )
 
@@ -131,7 +133,7 @@ class RankBasedPrioritizedReplayBuffer:
         probs = np.zeros_like(rank_probs)
         probs[sorted_indices] = rank_probs
         probs /= probs.sum()
-        
+
         return probs
 
     def sample(self, batch_size):
@@ -192,14 +194,8 @@ class MarioAgent:
         self.q_network = DQN(state_shape, n_actions).to(DEVICE)
         self.target_network = DQN(state_shape, n_actions).to(DEVICE)
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
-        
-        # Add learning rate scheduler
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer,
-            mode='max',  # We want to maximize the reward
-            factor=0.5,  # Reduce LR when plateauing
-            patience=20,  # Number of epochs to wait before reducing LR
-        )
+
+        self.current_epoch = 0
 
         # Experience replay
         self.memory = RankBasedPrioritizedReplayBuffer(memory_size)
@@ -234,7 +230,7 @@ class MarioAgent:
 
         returned_loss = 0
         returned_td_error = 0
-        
+
         for chunk_start in range(0, episodes, chunk_size):
             chunk_end = min(chunk_start + chunk_size, episodes)
 
@@ -266,6 +262,8 @@ class MarioAgent:
 
                 # Calculate TD errors for priority updates
                 td_errors = torch.abs(current_q_values.squeeze() - target_q_values).detach().cpu().numpy()
+
+                returned_td_error = td_errors.mean()
 
                 # Calculate weighted loss
                 loss = (weights * F.mse_loss(current_q_values.squeeze(), target_q_values, reduction='none')).mean()
@@ -299,10 +297,6 @@ class MarioAgent:
                         self.tau * q_param.data + (1.0 - self.tau) * target_param.data
                     )
 
-                # Clear CUDA cache after each batch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
         # Update epsilon after all batches have been processed
         if self.epsilon > self.epsilon_min:
             self.epsilon -= self.epsilon_decay
@@ -312,15 +306,14 @@ class MarioAgent:
         # Update target network after all batches have been processed and epsilon is updated
         self.steps += 1  # Increment steps by the number of episodes trained
 
-
-
-
-        # Update learning rate based on average reward
         avg_reward = total_reward / episodes
-        self.scheduler.step(avg_reward)
-        
+
+        if self.current_epoch != 0 and self.current_epoch % LR_DECAY_RATE == 0:
+            self.optimizer.param_groups[0]['lr'] *= LR_DECAY_FACTOR
+
         # Print current learning rate
         current_lr = self.optimizer.param_groups[0]['lr']
         print(f"[AGENT] Current learning rate: {current_lr}")
 
-        return current_lr, avg_reward, returned_loss
+        self.current_epoch += 1
+        return current_lr, avg_reward, returned_loss, returned_td_error

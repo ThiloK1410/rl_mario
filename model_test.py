@@ -4,7 +4,8 @@ import torch
 
 from dqn_agent import MarioAgent
 from environment import create_env
-from mario_rl import find_latest_checkpoint, load_checkpoint, BUFFER_SIZE, DEADLOCK_STEPS
+from mario_rl import find_latest_checkpoint, load_checkpoint
+from config import BUFFER_SIZE, DEADLOCK_STEPS
 from multiprocessing import Queue
 
 import numpy as np
