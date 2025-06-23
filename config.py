@@ -3,6 +3,8 @@
 # Data file for logging training progress
 DATA_FILE = "training_log.csv"
 
+AGENT_FOLDER = "checkpoints"
+
 # Maximum size of the queue where collector processes store replays,
 # the limit is for when the collector threads outpace the main thread
 REP_Q_SIZE = 3000

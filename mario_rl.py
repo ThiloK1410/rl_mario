@@ -20,7 +20,7 @@ from dqn_agent import DQN, MarioAgent, DEVICE
 from config import (
     DATA_FILE, REP_Q_SIZE, BUFFER_SIZE, NUM_EPOCHS, DEADLOCK_STEPS,
     MAX_STEPS_PER_RUN, BATCH_SIZE, EPISODES_PER_EPOCH, LEARNING_RATE,
-    SAVE_INTERVAL, EPSILON_START, EPSILON_DECAY, EPSILON_MIN, GAMMA
+    SAVE_INTERVAL, EPSILON_START, EPSILON_DECAY, EPSILON_MIN, GAMMA, AGENT_FOLDER
 )
 
 mp.set_start_method('spawn', force=True)
@@ -92,6 +92,7 @@ def write_log(epoch, data_dict):
     # If the file doesn't exist, write with the header.
     # Otherwise, append without the header.
     df.to_csv(DATA_FILE, mode='a', header=not file_exists, index=False)
+
 
 # this function will be run by each collector process
 def collector_process(experience_queue, model_queue, stop_event, epsilon, id, queue_lock):
@@ -224,7 +225,7 @@ def main():
 
     # Try to load the latest checkpoint
     start_epoch = 0
-    latest_checkpoint = find_latest_checkpoint()
+    latest_checkpoint = find_latest_checkpoint(checkpoint_dir=AGENT_FOLDER)
     if latest_checkpoint:
         start_epoch = load_checkpoint(agent, latest_checkpoint)
         print(f"Resuming training from epoch {start_epoch}")
@@ -283,7 +284,7 @@ def main():
 
             # Save checkpoint
             if epoch % SAVE_INTERVAL == 0 and epoch != 0:  # Save every 10 epochs
-                save_checkpoint(agent, epoch)
+                save_checkpoint(agent, epoch, checkpoint_dir=AGENT_FOLDER)
 
             log_data = {
                 'td_error': td_error,
