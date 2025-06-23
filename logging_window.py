@@ -5,8 +5,9 @@ import time
 from datetime import datetime
 import altair as alt
 
+from config import DATA_FILE
+
 # --- Configuration ---
-DATA_FILE = "training_log.csv"
 REFRESH_RATE_SECONDS = 5  # How often the app should check the file for new data
 
 # Set the page title and a descriptive header.

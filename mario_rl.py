@@ -20,7 +20,7 @@ from dqn_agent import DQN, MarioAgent, DEVICE
 from config import (
     DATA_FILE, REP_Q_SIZE, BUFFER_SIZE, NUM_EPOCHS, DEADLOCK_STEPS,
     MAX_STEPS_PER_RUN, BATCH_SIZE, EPISODES_PER_EPOCH, LEARNING_RATE,
-    SAVE_INTERVAL, EPSILON_START, EPSILON_DECAY, EPSILON_MIN, GAMMA, AGENT_FOLDER
+    SAVE_INTERVAL, EPSILON_START, EPSILON_DECAY, EPSILON_MIN, GAMMA, AGENT_FOLDER, NUM_PROCESSES
 )
 
 mp.set_start_method('spawn', force=True)
@@ -54,7 +54,7 @@ def load_checkpoint(agent, checkpoint_path):
         print(f"No checkpoint found at {checkpoint_path}")
         return 0  # Return initial epoch
 
-    checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device(DEVICE))
 
     agent.q_network.load_state_dict(checkpoint['model_state_dict'])
     agent.target_network.load_state_dict(checkpoint['model_state_dict'])
@@ -97,7 +97,7 @@ def write_log(epoch, data_dict):
 # this function will be run by each collector process
 def collector_process(experience_queue, model_queue, stop_event, epsilon, id, queue_lock):
     try:
-        env = create_env(deadlock_steps=DEADLOCK_STEPS)
+        env = create_env()
         print(f"[Collector {id}] Environment created successfully")
 
         # Initialize model with minimal memory footprint
@@ -212,7 +212,7 @@ def wait_for_buffer(agent, experience_queue, min_buffer_size=BUFFER_SIZE/32):
 
 def main():
     # Create and wrap the environment
-    env = create_env(deadlock_steps=DEADLOCK_STEPS)
+    env = create_env()
 
     # Create shared resources
     experience_queue = Queue()
@@ -231,18 +231,16 @@ def main():
         print(f"Resuming training from epoch {start_epoch}")
 
     # Spawning collector processes to continuously collect memories
-    num_collectors = 6
     collectors = []
-
     # Start collector processes
-    for i in range(num_collectors):
+    for i in range(NUM_PROCESSES):
         p = Process(target=collector_process,
                     args=(experience_queue, model_queue, stop_event, agent.epsilon, i+1, queue_lock))
         collectors.append(p)
         p.start()
 
     # Send initial model weights to all collectors
-    for _ in range(num_collectors):
+    for _ in range(NUM_PROCESSES):
         model_queue.put((agent.q_network.state_dict(), agent.epsilon))
 
     # initially fill up the buffer partially (25%)
@@ -278,12 +276,13 @@ def main():
             print("[MAIN] Training agent...")
             lr, avg_reward, loss, td_error = agent.replay(batch_size=BATCH_SIZE, episodes=EPISODES_PER_EPOCH)
 
-            for _ in range(num_collectors // 2):
+            # give each collector process a model update
+            for _ in range(NUM_PROCESSES):
                 model_queue.put((agent.q_network.state_dict(), agent.epsilon))
             print(f"Replay buffer size: {len(agent.memory.buffer)}")
 
             # Save checkpoint
-            if epoch % SAVE_INTERVAL == 0 and epoch != 0:  # Save every 10 epochs
+            if epoch % SAVE_INTERVAL == 0 and epoch != 0:
                 save_checkpoint(agent, epoch, checkpoint_dir=AGENT_FOLDER)
 
             log_data = {

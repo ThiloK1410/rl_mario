@@ -16,7 +16,7 @@ print(f"Using device: {DEVICE}")
 
 
 class DQN(nn.Module):
-    def __init__(self, input_shape, n_actions, input_channels=4):
+    def __init__(self, input_shape, n_actions, input_channels=8):
         super(DQN, self).__init__()
 
         self.conv = nn.Sequential(
@@ -59,23 +59,20 @@ class DQN(nn.Module):
 
         # Pass through the fully-connected layers to get Q-values
         return self.fc(conv_out)
-class SharedReplayBuffer:
-    def __init__(self, capacity, experience_queue):
+
+class StandardReplayBuffer:
+    def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
-        self.lock = Lock()
-        self.experience_queue = experience_queue
 
     def push(self, state, action, reward, next_state, done):
-        with self.lock:
-            self.buffer.append((state, action, reward, next_state, done))
+        self.buffer.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size):
-        with self.lock:
-            if len(self.buffer) < batch_size:
-                return None
-            batch = random.sample(self.buffer, batch_size)
-            state, action, reward, next_state, done = map(np.stack, zip(*batch))
-            return state, action, reward, next_state, done
+        if len(self.buffer) < batch_size:
+            return None, None, None, None, None, None, None
+        batch = random.sample(self.buffer, batch_size)
+        state, action, reward, next_state, done = map(np.stack, zip(*batch))
+        return state, action, reward, next_state, done, None, None
 
 
 class RankBasedPrioritizedReplayBuffer:
@@ -198,12 +195,7 @@ class MarioAgent:
         self.current_epoch = 0
 
         # Experience replay
-        self.memory = RankBasedPrioritizedReplayBuffer(memory_size)
-
-        # Training metrics
-        self.update_target_frequency = 5
-        self.steps = 0
-        self.best_reward = float('-inf')  # Track best reward for scheduler
+        self.memory = StandardReplayBuffer(memory_size)
 
     def act(self, state, epsilon_override=None):
         epsilon = self.epsilon
@@ -224,17 +216,12 @@ class MarioAgent:
         if len(self.memory.buffer) < batch_size:
             return
 
-        # Process in smaller chunks to reduce memory usage
-        chunk_size = 10  # Process 10 batches at a time
         total_reward = 0  # Track total reward for this replay session
 
         returned_loss = 0
         returned_td_error = 0
 
-        for chunk_start in range(0, episodes, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, episodes)
-
-            for _ in range(chunk_start, chunk_end):
+        for _ in range(episodes):
                 # Sample batch with priorities
                 batch = self.memory.sample(batch_size)
                 if batch is None:
@@ -249,7 +236,12 @@ class MarioAgent:
                 rewards = torch.FloatTensor(rewards).to(DEVICE)
                 next_states = torch.FloatTensor(next_states).to(DEVICE)
                 dones = torch.BoolTensor(dones).to(DEVICE)
-                weights = torch.FloatTensor(weights).to(DEVICE)
+                
+                # Handle weights - use ones if weights is None
+                if weights is None:
+                    weights = torch.ones(batch_size).to(DEVICE)
+                else:
+                    weights = torch.FloatTensor(weights).to(DEVICE)
 
                 # Calculate the q-value predictions for the current state
                 current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1))
@@ -286,8 +278,9 @@ class MarioAgent:
 
                 self.optimizer.step()
 
-                # Update priorities based on TD errors
-                self.memory.update_priorities(indices, td_errors + 1e-6)  # Add small constant to avoid zero priorities
+                # Update priorities based on TD errors only if using prioritized replay
+                if indices is not None:
+                    self.memory.update_priorities(indices, td_errors + 1e-6)  # Add small constant to avoid zero priorities
 
                 # instead of doing hard target network updates we use this polyac averaging at each step to get more stable results
                 q_network_params = self.q_network.parameters()
@@ -302,9 +295,6 @@ class MarioAgent:
             self.epsilon -= self.epsilon_decay
         else:
             self.epsilon = self.epsilon_min
-
-        # Update target network after all batches have been processed and epsilon is updated
-        self.steps += 1  # Increment steps by the number of episodes trained
 
         avg_reward = total_reward / episodes
 
