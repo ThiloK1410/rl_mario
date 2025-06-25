@@ -195,7 +195,7 @@ class MarioAgent:
         self.current_epoch = 0
 
         # Experience replay
-        self.memory = StandardReplayBuffer(memory_size)
+        self.memory = RankBasedPrioritizedReplayBuffer(memory_size)
 
     def act(self, state, epsilon_override=None):
         epsilon = self.epsilon
@@ -246,8 +246,10 @@ class MarioAgent:
                 # Calculate the q-value predictions for the current state
                 current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1))
 
-                # Predict the highest q-value action reachable from the next state
-                next_q_values = self.target_network(next_states).max(1)[0].detach()
+                # first we get the action we would take in the next state
+                next_actions = self.q_network(next_states).argmax(1).unsqueeze(1)
+                # then we get the target q values, for the taken action
+                next_q_values = self.target_network(next_states).gather(1, next_actions).squeeze(1).detach()
 
                 # Calculate the target q-values using the Bellman equation
                 target_q_values = rewards + (self.gamma * next_q_values * ~dones)

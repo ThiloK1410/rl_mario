@@ -11,7 +11,7 @@ RANDOM_STAGES = False
 
 # number of processes collecting experiences
 # ( this is CPU expensive and the amount of collected experiences is capped by REP_Q_SIZE => finetuning for machine necessary)
-NUM_PROCESSES = 2
+NUM_PROCESSES = 1
 
 # Interval at which the model will be saved
 SAVE_INTERVAL = 100
@@ -30,10 +30,10 @@ BUFFER_SIZE = 20000
 REP_Q_SIZE = 1000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 1024
+BATCH_SIZE = 512
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 4
+EPISODES_PER_EPOCH = 2
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000

@@ -30,13 +30,13 @@ def main():
         total_reward = 0
         current_step = 0
         while not done:
-            action = agent.act(state)
+            action = agent.act(state, epsilon_override=0.1)
             next_state, reward, done, info = env.step(action)
             env.render()
             total_reward += reward
             state = next_state
             print(f"Step {current_step}\treward: {reward}\tx_position: {info['x_pos']}\ty_position: {info['y_pos']}\tstate: {info['status']}")
-            sleep(1.0)
+            sleep(1.0/20.0)
 
 
         print(f"total reward in episode {i}: {total_reward}")
