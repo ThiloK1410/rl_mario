@@ -8,7 +8,7 @@ from collections import deque
 from multiprocessing import Lock, Event
 import bisect
 
-from config import LR_DECAY_RATE, LR_DECAY_FACTOR
+from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU
 
 # Global device variable
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -37,7 +37,6 @@ class DQN(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(conv_out_size, 512),
             nn.ReLU(),
-            nn.Dropout(p=0.2), # Added Dropout to regularize the dense layer
             nn.Linear(512, n_actions)
         )
 
@@ -185,7 +184,7 @@ class MarioAgent:
         self.batch_size = batch_size
 
         # tau describes the percentage the target network gets nudged to the q-network each step
-        self.tau = 0.002
+        self.tau = AGENT_TAU
 
         # Neural networks
         self.q_network = DQN(state_shape, n_actions).to(DEVICE)
@@ -195,7 +194,7 @@ class MarioAgent:
         self.current_epoch = 0
 
         # Experience replay
-        self.memory = RankBasedPrioritizedReplayBuffer(memory_size)
+        self.memory = StandardReplayBuffer(memory_size)
 
     def act(self, state, epsilon_override=None):
         epsilon = self.epsilon

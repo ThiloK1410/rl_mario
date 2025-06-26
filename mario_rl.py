@@ -95,7 +95,7 @@ def write_log(epoch, data_dict):
 
 
 # this function will be run by each collector process
-def collector_process(experience_queue, model_queue, stop_event, epsilon, id, queue_lock):
+def collector_process(experience_queue, model_queue, distance_queue, stop_event, epsilon, id, queue_lock):
     try:
         env = create_env()
         print(f"[Collector {id}] Environment created successfully")
@@ -115,12 +115,17 @@ def collector_process(experience_queue, model_queue, stop_event, epsilon, id, qu
         # respond to stop event from parent process
         episode_count = 0
         best_reward = 0
+        # keeping track of distance reached in episode
+        best_x = 0
         while not stop_event.is_set():
             try:
+                # At the start of each episode
+                best_x = 0
                 state = env.reset()
                 done = False
                 total_reward = 0
                 steps = 0
+
 
                 while not done and not stop_event.is_set():
                     try:
@@ -146,6 +151,8 @@ def collector_process(experience_queue, model_queue, stop_event, epsilon, id, qu
 
                     # Take action and send experience
                     next_state, reward, done, info = env.step(action)
+                    # update best x
+                    best_x = max(best_x, info['x_pos'])
 
                     # Acquire lock before putting experience in queue
                     with queue_lock:
@@ -176,6 +183,9 @@ def collector_process(experience_queue, model_queue, stop_event, epsilon, id, qu
                     avg_reward = sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0
                     print(f"[Collector {id}] Episode {episode_count} - Average reward (last {len(recent_rewards)} episodes): {avg_reward:.2f} - Total best reward: {best_reward:.2f}")
                     last_print_time = current_time
+
+                if best_x != 0:
+                    distance_queue.put(best_x)
 
             except Exception as e:
                 print(f"[Collector {id}] Error in episode loop: {str(e)}")
@@ -217,8 +227,11 @@ def main():
     # Create shared resources
     experience_queue = Queue()
     model_queue = Queue()
+    ep_distance_queue = Queue()
     stop_event = Event()
     queue_lock = Lock()  # Create a lock for the queue
+
+    ep_dist_deque = deque(maxlen=50)
 
     # Initialize agent
     agent = MarioAgent((128, 128), env.action_space.n, experience_queue, memory_size=BUFFER_SIZE, gamma=GAMMA, epsilon_decay=EPSILON_DECAY, epsilon_min=EPSILON_MIN, lr=LEARNING_RATE, epsilon=EPSILON_START)
@@ -235,7 +248,7 @@ def main():
     # Start collector processes
     for i in range(NUM_PROCESSES):
         p = Process(target=collector_process,
-                    args=(experience_queue, model_queue, stop_event, agent.epsilon, i+1, queue_lock))
+                    args=(experience_queue, model_queue, ep_distance_queue, stop_event, agent.epsilon, i+1, queue_lock))
         collectors.append(p)
         p.start()
 
@@ -268,6 +281,15 @@ def main():
             if processed > 0:
                 print(f"[MAIN] Processed {processed} experiences from queue")
 
+            processed = 0
+            while True:
+                try:
+                    ep_dist_deque.append(ep_distance_queue.get(timeout=0.01))
+                except Empty:
+                    break
+            print(f"[MAIN] Processed {processed} episode stats from queue")
+
+
             # Check if we have enough samples for training
             if len(agent.memory.buffer) < BATCH_SIZE:
                 print(f"[MAIN] Not enough samples for training (have {len(agent.memory.buffer)}, need {BATCH_SIZE})")
@@ -285,11 +307,14 @@ def main():
             if epoch % SAVE_INTERVAL == 0 and epoch != 0:
                 save_checkpoint(agent, epoch, checkpoint_dir=AGENT_FOLDER)
 
+            avg_dist = sum(ep_dist_deque) / len(ep_dist_deque) if ep_dist_deque else 0
             log_data = {
                 'td_error': td_error,
                 'loss': loss,
                 'average_reward': avg_reward,
+                'average distance': avg_dist,
                 'learning_rate': lr,
+                'epsilon': agent.epsilon,
                 'buffer_size': len(agent.memory.buffer)
             }
             write_log(epoch, log_data)

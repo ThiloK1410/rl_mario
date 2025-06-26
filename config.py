@@ -51,16 +51,16 @@ MAX_STEPS_PER_RUN = 0
 LEARNING_RATE = 0.001
 
 # Initial epsilon value for epsilon-greedy exploration
-EPSILON_START = 0.9
+EPSILON_START = 1.0
 
 # How much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.005
+EPSILON_DECAY = 0.001
 
 # Minimum epsilon value
 EPSILON_MIN = 0.1
 
 # Learning rate decay factor
-LR_DECAY_FACTOR = 0.9
+LR_DECAY_FACTOR = 0.95
 
 # Learning rate decay rate
 LR_DECAY_RATE = 100
@@ -90,3 +90,6 @@ COMPLETION_REWARD = 2.0
 
 # factors the amount mario gets rewarded for gaining item effects
 ITEM_REWARD_FACTOR = 1.0
+
+# tau describes the percentage of how much the target networks aligns with the dqn each step
+AGENT_TAU = 0.002

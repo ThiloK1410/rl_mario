@@ -23,14 +23,14 @@ def main():
         print("No checkpoint found")
         exit(1)
 
-    for i in range(40):
+    for i in range(20):
         print(f"Starting episode {i}")
         state = env.reset()
         done = False
         total_reward = 0
         current_step = 0
         while not done:
-            action = agent.act(state, epsilon_override=0.1)
+            action = agent.act(state, epsilon_override=0.05)
             next_state, reward, done, info = env.step(action)
             env.render()
             total_reward += reward
