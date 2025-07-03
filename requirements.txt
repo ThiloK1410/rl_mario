@@ -1,8 +1,18 @@
+# Core dependencies
 numpy==1.26.4
 gym==0.24.1
 gym-super-mario-bros==7.4.0
 nes-py==8.2.1
 opencv-python==4.6.0.66
 keyboard==0.13.5 
+
+# Deep Learning
 torch~=2.7.1
-streamlit==1.29.0
+tensordict>=0.8.0
+torchrl>=0.8.0
+
+# Visualization and Logging
+tensorboard>=2.13.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+pandas>=1.5.0
