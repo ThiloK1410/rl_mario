@@ -19,7 +19,7 @@ except ImportError:
     TORCHRL_AVAILABLE = False
     print("Warning: TorchRL not available, falling back to standard replay buffer")
 
-from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU
+from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU, PER_ALPHA, PER_BETA, PER_BETA_INCREMENT
 
 # Global device variable
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -94,14 +94,14 @@ class TorchRLPrioritizedReplayBuffer:
     TorchRL-based PrioritizedReplayBuffer that stores data on CPU
     and only moves sampled batches to GPU for maximum memory efficiency.
     """
-    def __init__(self, capacity, alpha=0.6, beta=0.4, beta_increment=0.001):
+    def __init__(self, capacity, alpha=None, beta=None, beta_increment=None):
         if not TORCHRL_AVAILABLE:
             raise ImportError("TorchRL is not available. Please install it with: pip install torchrl")
         
         self.capacity = capacity
-        self.alpha = alpha
-        self.beta = beta
-        self.beta_increment = beta_increment
+        self.alpha = alpha if alpha is not None else PER_ALPHA
+        self.beta = beta if beta is not None else PER_BETA
+        self.beta_increment = beta_increment if beta_increment is not None else PER_BETA_INCREMENT
         self.max_beta = 1.0
         self._current_size = 0
         
@@ -112,8 +112,8 @@ class TorchRLPrioritizedReplayBuffer:
         self._storage = ListStorage(capacity)
         self._sampler = PrioritizedSampler(
             max_capacity=capacity,
-            alpha=alpha,
-            beta=beta
+            alpha=self.alpha,
+            beta=self.beta
         )
         
         self._replay_buffer = TensorDictReplayBuffer(
@@ -238,13 +238,13 @@ class TorchRLPrioritizedReplayBuffer:
 
 
 class RankBasedPrioritizedReplayBuffer:
-    def __init__(self, capacity, alpha=0.6, beta=0.4, beta_increment=0.001):
+    def __init__(self, capacity, alpha=None, beta=None, beta_increment=None):
         self.capacity = capacity
 
         # Priority parameters
-        self.alpha = alpha  # Priority exponent (how much prioritization to use)
-        self.beta = beta  # Importance sampling exponent (to correct for bias)
-        self.beta_increment = beta_increment
+        self.alpha = alpha if alpha is not None else PER_ALPHA  # Priority exponent (how much prioritization to use)
+        self.beta = beta if beta is not None else PER_BETA  # Importance sampling exponent (to correct for bias)
+        self.beta_increment = beta_increment if beta_increment is not None else PER_BETA_INCREMENT
         self.max_beta = 1.0
 
         # Storage

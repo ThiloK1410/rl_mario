@@ -18,14 +18,31 @@ def list_experiments(runs_dir="runs"):
         print(f"No experiments found. Directory {runs_dir} does not exist.")
         return []
     
+    def has_event_files_recursive(directory):
+        """Check if directory has any TensorBoard event files (recursively)"""
+        if not directory.exists() or not directory.is_dir():
+            return False
+        
+        # Check current directory
+        for file in directory.glob('*'):
+            if file.is_file() and file.name.startswith('events.out.tfevents'):
+                return True
+        
+        # Check subdirectories recursively
+        for subdir in directory.iterdir():
+            if subdir.is_dir() and has_event_files_recursive(subdir):
+                return True
+        
+        return False
+    
     experiments = []
     for exp_dir in runs_path.iterdir():
         if exp_dir.is_dir():
             # Get creation time
             creation_time = datetime.fromtimestamp(exp_dir.stat().st_ctime)
             
-            # Check if it has TensorBoard event files
-            has_events = any(f.name.startswith('events.out.tfevents') for f in exp_dir.glob('*'))
+            # Check if it has TensorBoard event files (recursively)
+            has_events = has_event_files_recursive(exp_dir)
             
             experiments.append({
                 'name': exp_dir.name,
@@ -89,7 +106,7 @@ def remove_experiment(experiment_name, runs_dir="runs"):
 
 
 def cleanup_empty_experiments(runs_dir="runs"):
-    """Remove experiments with no data"""
+    """Remove experiments with no data and nested empty directories, including TensorBoard hparams subdirs"""
     runs_path = Path(runs_dir)
     
     if not runs_path.exists():
@@ -97,12 +114,69 @@ def cleanup_empty_experiments(runs_dir="runs"):
         return
     
     removed_count = 0
+    hparams_subdir_count = 0
+    
+    def has_event_files(directory):
+        """Check if directory has any TensorBoard event files"""
+        if not directory.exists() or not directory.is_dir():
+            return False
+        
+        # Check current directory
+        for file in directory.glob('*'):
+            if file.is_file() and file.name.startswith('events.out.tfevents'):
+                return True
+        
+        # Check subdirectories recursively
+        for subdir in directory.iterdir():
+            if subdir.is_dir() and has_event_files(subdir):
+                return True
+        
+        return False
+    
+    def is_hparams_subdir(directory):
+        """Check if this is a TensorBoard hparams subdirectory (numeric name)"""
+        try:
+            float(directory.name)
+            return True
+        except ValueError:
+            return False
+    
+    def remove_empty_subdirs(directory):
+        """Remove empty subdirectories recursively"""
+        if not directory.exists() or not directory.is_dir():
+            return
+        
+        # First, clean up subdirectories
+        for subdir in directory.iterdir():
+            if subdir.is_dir():
+                remove_empty_subdirs(subdir)
+                # Remove if now empty
+                try:
+                    if not any(subdir.iterdir()):
+                        subdir.rmdir()
+                        print(f"Removed empty subdirectory: {subdir}")
+                except OSError:
+                    pass  # Directory not empty or other issue
+    
+    # Process all experiment directories
     for exp_dir in runs_path.iterdir():
         if exp_dir.is_dir():
-            # Check if it has any event files
-            has_events = any(f.name.startswith('events.out.tfevents') for f in exp_dir.glob('*'))
+            # Special handling for TensorBoard hparams subdirectories
+            for subdir in list(exp_dir.iterdir()):
+                if subdir.is_dir() and is_hparams_subdir(subdir):
+                    # Remove numeric subdirectories created by add_hparams
+                    try:
+                        shutil.rmtree(subdir)
+                        print(f"Removed TensorBoard hparams subdirectory: {subdir}")
+                        hparams_subdir_count += 1
+                    except Exception as e:
+                        print(f"Error removing hparams subdir {subdir}: {e}")
             
-            if not has_events:
+            # First clean up empty subdirectories
+            remove_empty_subdirs(exp_dir)
+            
+            # Check if the entire experiment directory should be removed
+            if not has_event_files(exp_dir):
                 try:
                     shutil.rmtree(exp_dir)
                     print(f"Removed empty experiment: {exp_dir.name}")
@@ -110,7 +184,7 @@ def cleanup_empty_experiments(runs_dir="runs"):
                 except Exception as e:
                     print(f"Error removing {exp_dir.name}: {e}")
     
-    print(f"Cleaned up {removed_count} empty experiments.")
+    print(f"Cleaned up {removed_count} empty experiments and {hparams_subdir_count} TensorBoard hparams subdirectories.")
 
 
 def interactive_remove(runs_dir="runs"):

@@ -9,7 +9,7 @@ from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 import random
 import os
 
-from config import DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD, ITEM_REWARD_FACTOR, RANDOM_STAGES
+from config import DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD, ITEM_REWARD_FACTOR, RANDOM_STAGES, SCORE_REWARD_FACTOR
 
 
 # Environment preprocessing wrappers
@@ -147,7 +147,7 @@ class LevelLimitEnv(gym.Wrapper):
 
 # overwrites the whole existing reward structure and rewards moving right, getting score
 class RewardShaperEnv(gym.Wrapper):
-    def __init__(self, env, death_penalty=1.0):
+    def __init__(self, env, death_penalty, score_reward_factor):
         super().__init__(env)
         self.last_x_pos = 0
         self.last_life = 2  # Track life to detect death
@@ -157,7 +157,7 @@ class RewardShaperEnv(gym.Wrapper):
         self.neg_mov_factor = self.pos_mov_factor / 2.0
 
         self.last_score = 0
-        self.score_reward_scale = 0.01
+        self.score_reward_scale = score_reward_factor
         self.death_penalty = death_penalty
 
     def reset(self, **kwargs):
@@ -314,23 +314,9 @@ class RandomSaveStateWrapper(gym.Wrapper):
             return False
 
 
-def create_env(use_random_saves=True, sample_random_stages=True):
-    """Create and wrap a Mario environment with all necessary wrappers."""
-    if use_random_saves:
-        # Use random save states wrapper
-        if sample_random_stages:
-            print("🎲 Creating environment with random save states and random stages...")
-        else:
-            print("🎯 Creating environment with random save states (World 1-1 only)...")
-        
-        # Start with World 1-1 (may be replaced on first reset if sample_random_stages=True)
-        env = gym_super_mario_bros.make('SuperMarioBros-1-1-v0')
-        env = JoypadSpace(env, COMPLEX_MOVEMENT)
-        env = RandomSaveStateWrapper(env, save_states_dir="save_states")  # Apply save state wrapper early, before heavy processing
-    else:
-        # Use original logic for standard training
-        env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0' if RANDOM_STAGES else 'SuperMarioBros-v0')
-        env = JoypadSpace(env, COMPLEX_MOVEMENT)
+def create_env():
+    env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0' if RANDOM_STAGES else 'SuperMarioBros-v0')
+    env = JoypadSpace(env, COMPLEX_MOVEMENT)
     
     # Apply all the preprocessing wrappers
     env = GrayScaleObservation(env)
@@ -343,5 +329,5 @@ def create_env(use_random_saves=True, sample_random_stages=True):
     env = ItemRewardEnv(env, item_reward_factor=ITEM_REWARD_FACTOR)
     env = DeadlockEnv(env, threshold=DEADLOCK_STEPS, deadlock_penalty=DEADLOCK_PENALTY)
     # Apply RewardShaperEnv LAST to completely overwrite all rewards
-    env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY)
+    env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY, score_reward_factor=SCORE_REWARD_FACTOR)
     return env

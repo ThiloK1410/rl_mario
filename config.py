@@ -7,9 +7,7 @@ DATA_FILE = "training_log.csv"
 AGENT_FOLDER = "checkpoints"
 
 # specifies if we want to train on all stages or just the first
-RANDOM_STAGES = False
-
-RANDOM_SAVES = False
+RANDOM_STAGES = True
 
 # number of processes collecting experiences
 # ( this is CPU expensive and the amount of collected experiences is capped by REP_Q_SIZE => finetuning for machine necessary)
@@ -26,7 +24,7 @@ SAVE_INTERVAL = 100
 
 # The size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 200000
+BUFFER_SIZE = 10000
 
 # Maximum size of the queue where collector processes store replays,
 # the limit is for when the collector threads outpace the main thread
@@ -50,27 +48,27 @@ NUM_EPOCHS = 20000
 MAX_STEPS_PER_RUN = 0
 
 # starting learning rate for the neural network
-LEARNING_RATE = 0.0002
+LEARNING_RATE = 0.002
+
+# Learning rate decay factor
+LR_DECAY_FACTOR = 0.8
+
+# Learning rate decay rate
+LR_DECAY_RATE = 50
 
 # Initial epsilon value for epsilon-greedy exploration
 EPSILON_START = 1
 
 # How much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.001
+EPSILON_DECAY = 0.002
 
 # Minimum epsilon value
 EPSILON_MIN = 0.1
 
-# Learning rate decay factor
-LR_DECAY_FACTOR = 0.90
-
-# Learning rate decay rate
-LR_DECAY_RATE = 100
-
 # Gamma describes how much the agent should look for future rewards vs immediate ones.
 # gamma = 1 future rewards are as valuable as immediate ones
 # gamma = 0 only immediate rewards matter
-GAMMA = 0.99
+GAMMA = 0.95
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -92,7 +90,7 @@ ASYNC_MODEL_UPDATES = True
 # ----------------------------------------------------------------------------------------------------------------------
 
 # If an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 40
+DEADLOCK_STEPS = 30
 
 # reward penalty for getting stuck (absolute value)
 DEADLOCK_PENALTY = 0.5
@@ -104,7 +102,32 @@ DEATH_PENALTY = 1.0
 COMPLETION_REWARD = 2.0
 
 # factors the amount mario gets rewarded for gaining item effects
-ITEM_REWARD_FACTOR = 1.0
+ITEM_REWARD_FACTOR = 2.0
+
+# how much gaining score should be factored in the reward function,
+# score is very high so keep this factor low (ca. 0.01)
+SCORE_REWARD_FACTOR = 0.0
 
 # tau describes the percentage of how much the target networks aligns with the dqn each step
-AGENT_TAU = 0.005
+AGENT_TAU = 0.01
+
+# ----------------------------------------------------------------------------------------------------------------------
+# PRIORITIZED EXPERIENCE REPLAY (PER) PARAMETERS
+# ----------------------------------------------------------------------------------------------------------------------
+
+# PER alpha parameter - controls how much prioritization is used
+# alpha = 0: uniform random sampling (no prioritization)
+# alpha = 1: full prioritization based on TD error
+# Typical values: 0.6-0.7 for good balance between exploration and exploitation
+PER_ALPHA = 0.7
+
+# PER beta parameter - controls importance sampling correction
+# beta = 0: no correction for bias introduced by prioritization
+# beta = 1: full correction for bias
+# Starts low and increases during training to gradually correct bias
+PER_BETA = 0.4
+
+# PER beta increment - how much beta increases per sampling step
+# beta gradually increases to 1.0 during training for full bias correction
+# Typical values: 0.001-0.0001 depending on training length
+PER_BETA_INCREMENT = 0.001

@@ -4,7 +4,7 @@ import torch
 
 from dqn_agent import MarioAgent
 from environment import create_env
-from mario_rl_simple import find_latest_checkpoint, load_checkpoint
+from mario_rl_simple import find_latest_checkpoint, load_checkpoint, list_available_experiments
 from config import BUFFER_SIZE, DEADLOCK_STEPS, AGENT_FOLDER, RANDOM_STAGES, RANDOM_SAVES
 
 import numpy as np
@@ -13,15 +13,26 @@ import numpy as np
 def main():
     env = create_env(sample_random_stages=RANDOM_STAGES, use_random_saves=RANDOM_SAVES)
     agent = MarioAgent((128, 128), env.action_space.n, experience_queue=None)  # type: ignore
-    latest_checkpoint = find_latest_checkpoint(checkpoint_dir=AGENT_FOLDER)
+    
+    # Show available experiments
+    available_experiments = list_available_experiments(checkpoint_dir=AGENT_FOLDER)
+    if available_experiments:
+        print(f"Available experiments: {', '.join(available_experiments)}")
+        experiment_name = input("Enter experiment name to test (or press Enter for latest): ").strip()
+        if not experiment_name:
+            experiment_name = None
+    else:
+        experiment_name = None
+    
+    latest_checkpoint = find_latest_checkpoint(checkpoint_dir=AGENT_FOLDER, experiment_name=experiment_name)
     if latest_checkpoint:
-        start_epoch = load_checkpoint(agent, latest_checkpoint)
+        start_epoch, _ = load_checkpoint(agent, latest_checkpoint)
         print(f"loaded agent from epoch {start_epoch}")
     else:
         print("No checkpoint found")
         exit(1)
 
-    for i in range(20):
+    for i in range(0):
         print(f"Starting episode {i}")
         state = env.reset()
         done = False
@@ -34,7 +45,7 @@ def main():
             total_reward += reward
             state = next_state
             print(f"Step {current_step}\treward: {reward}\tx_position: {info['x_pos']}\ty_position: {info['y_pos']}\tstate: {info['status']}")
-            sleep(1.0/5.0)
+            sleep(1.0/20.0)
 
         print(f"total reward in episode {i}: {total_reward}")
 
