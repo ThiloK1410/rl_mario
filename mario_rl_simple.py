@@ -170,7 +170,7 @@ def main():
         print(f"[CHECKPOINT] Using checkpoint for experiment '{tb_logger.experiment_name}': {latest_checkpoint}")
     
     # Training parameters - ADJUSTED for more frequent training
-    reuse_ratio_threshold = 5.0
+    reuse_ratio_threshold = 40.0
     
     # Log hyperparameters at the start (only for new experiments)
     if not loaded_experiment_name:

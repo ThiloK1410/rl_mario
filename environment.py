@@ -9,7 +9,8 @@ from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 import random
 import os
 
-from config import DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD, ITEM_REWARD_FACTOR, RANDOM_STAGES, SCORE_REWARD_FACTOR
+from config import DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD, ITEM_REWARD_FACTOR, \
+    RANDOM_STAGES, SCORE_REWARD_FACTOR, MOVE_REWARD
 
 
 # Environment preprocessing wrappers
@@ -152,9 +153,9 @@ class RewardShaperEnv(gym.Wrapper):
         self.last_x_pos = 0
         self.last_life = 2  # Track life to detect death
         # reward = distance * factor
-        self.pos_mov_factor = 1.0 / 12.0
+        self.pos_mov_factor = MOVE_REWARD
         # separate factor for moving backwards
-        self.neg_mov_factor = self.pos_mov_factor / 2.0
+        self.neg_mov_factor = MOVE_REWARD / 2.0
 
         self.last_score = 0
         self.score_reward_scale = score_reward_factor

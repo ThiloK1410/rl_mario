@@ -24,17 +24,17 @@ SAVE_INTERVAL = 100
 
 # The size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 10000
+BUFFER_SIZE = 200000
 
 # Maximum size of the queue where collector processes store replays,
 # the limit is for when the collector threads outpace the main thread
 REP_Q_SIZE = 2000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 1024
+BATCH_SIZE = 4096
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 4
+EPISODES_PER_EPOCH = 10
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000
@@ -48,19 +48,19 @@ NUM_EPOCHS = 20000
 MAX_STEPS_PER_RUN = 0
 
 # starting learning rate for the neural network
-LEARNING_RATE = 0.002
+LEARNING_RATE = 0.0002
 
 # Learning rate decay factor
 LR_DECAY_FACTOR = 0.8
 
 # Learning rate decay rate
-LR_DECAY_RATE = 50
+LR_DECAY_RATE = 100
 
 # Initial epsilon value for epsilon-greedy exploration
 EPSILON_START = 1
 
 # How much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.002
+EPSILON_DECAY = 0.001
 
 # Minimum epsilon value
 EPSILON_MIN = 0.1
@@ -90,7 +90,11 @@ ASYNC_MODEL_UPDATES = True
 # ----------------------------------------------------------------------------------------------------------------------
 
 # If an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 30
+DEADLOCK_STEPS = 40
+
+# how much the reward for moving should be factored in, moving backwards is half that
+# 1/12 roughly normalizes to 1
+MOVE_REWARD = 1.0 / 6.0
 
 # reward penalty for getting stuck (absolute value)
 DEADLOCK_PENALTY = 0.5
@@ -102,7 +106,7 @@ DEATH_PENALTY = 1.0
 COMPLETION_REWARD = 2.0
 
 # factors the amount mario gets rewarded for gaining item effects
-ITEM_REWARD_FACTOR = 2.0
+ITEM_REWARD_FACTOR = 0.0
 
 # how much gaining score should be factored in the reward function,
 # score is very high so keep this factor low (ca. 0.01)
@@ -119,7 +123,7 @@ AGENT_TAU = 0.01
 # alpha = 0: uniform random sampling (no prioritization)
 # alpha = 1: full prioritization based on TD error
 # Typical values: 0.6-0.7 for good balance between exploration and exploitation
-PER_ALPHA = 0.7
+PER_ALPHA = 0.6
 
 # PER beta parameter - controls importance sampling correction
 # beta = 0: no correction for bias introduced by prioritization

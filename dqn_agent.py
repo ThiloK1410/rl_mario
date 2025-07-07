@@ -68,17 +68,43 @@ class DQN(nn.Module):
         return self.fc(conv_out)
 
 class StandardReplayBuffer:
+    """
+    Memory-efficient standard replay buffer that stores uint8 data
+    and only converts to float32 when sampling for training.
+    """
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
 
     def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
+        # Convert LazyFrames to numpy arrays and ensure uint8 for memory efficiency
+        def to_numpy_uint8(obj):
+            if hasattr(obj, '__array__'):
+                arr = np.array(obj)
+            elif isinstance(obj, np.ndarray):
+                arr = obj
+            else:
+                arr = np.array(obj)
+            
+            # Ensure uint8 dtype for states to save memory
+            if arr.dtype != np.uint8:
+                arr = arr.astype(np.uint8)
+            return arr
+        
+        state_np = to_numpy_uint8(state)
+        next_state_np = to_numpy_uint8(next_state)
+        
+        self.buffer.append((state_np, action, reward, next_state_np, done))
 
     def sample(self, batch_size):
         if len(self.buffer) < batch_size:
             return None, None, None, None, None, None, None
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state, done = map(np.stack, zip(*batch))
+        
+        # Convert uint8 states to float32 for training
+        state = state.astype(np.float32)
+        next_state = next_state.astype(np.float32)
+        
         return state, action, reward, next_state, done, None, None
 
     def update_priorities(self, indices, new_priorities):
@@ -91,8 +117,9 @@ class StandardReplayBuffer:
 
 class TorchRLPrioritizedReplayBuffer:
     """
-    TorchRL-based PrioritizedReplayBuffer that stores data on CPU
-    and only moves sampled batches to GPU for maximum memory efficiency.
+    Memory-efficient TorchRL-based PrioritizedReplayBuffer that stores uint8 data on CPU
+    and only converts to float32 when sampling for training.
+    This reduces memory usage by ~75% compared to storing float32 data.
     """
     def __init__(self, capacity, alpha=None, beta=None, beta_increment=None):
         if not TORCHRL_AVAILABLE:
@@ -124,7 +151,7 @@ class TorchRLPrioritizedReplayBuffer:
         )
         
     def push(self, state, action, reward, next_state, done):
-        """Add a new experience to the buffer - stored on CPU."""
+        """Add a new experience to the buffer - stored as uint8 on CPU for memory efficiency."""
         # Convert LazyFrames to numpy arrays if needed
         def to_numpy(obj):
             if hasattr(obj, '__array__'):
@@ -134,16 +161,22 @@ class TorchRLPrioritizedReplayBuffer:
             else:
                 return np.array(obj)
         
-        # Convert states to numpy arrays
+        # Convert states to numpy arrays and keep as uint8 for memory efficiency
         state_np = to_numpy(state)
         next_state_np = to_numpy(next_state)
         
-        # Create TensorDict without artificial batch dimensions - let TorchRL handle batching
+        # Ensure uint8 dtype for maximum memory efficiency
+        if state_np.dtype != np.uint8:
+            state_np = state_np.astype(np.uint8)
+        if next_state_np.dtype != np.uint8:
+            next_state_np = next_state_np.astype(np.uint8)
+        
+        # Create TensorDict with uint8 data - let TorchRL handle batching
         tensordict = TensorDict({
-            "state": torch.from_numpy(state_np).float(),           # [8, 128, 128]
+            "state": torch.from_numpy(state_np).byte(),           # [8, 128, 128] uint8
             "action": torch.tensor(action, dtype=torch.long),      # scalar
             "reward": torch.tensor(reward, dtype=torch.float),     # scalar  
-            "next_state": torch.from_numpy(next_state_np).float(), # [8, 128, 128]
+            "next_state": torch.from_numpy(next_state_np).byte(), # [8, 128, 128] uint8
             "done": torch.tensor(done, dtype=torch.bool),          # scalar
             "td_error": torch.tensor(1.0, dtype=torch.float)       # scalar
         }, batch_size=[], device=self.cpu_device)  # No batch dimension - let TorchRL handle it
@@ -154,7 +187,7 @@ class TorchRLPrioritizedReplayBuffer:
 
     def push_batch(self, experiences):
         """
-        Add multiple experiences to the buffer at once - stored on CPU.
+        Add multiple experiences to the buffer at once - stored as uint8 on CPU.
         Add each experience individually to ensure TorchRL compatibility.
         
         Args:
@@ -169,7 +202,7 @@ class TorchRLPrioritizedReplayBuffer:
             self.push(state, action, reward, next_state, done)
     
     def sample(self, batch_size):
-        """Sample a batch from the buffer, move to GPU only when sampling."""
+        """Sample a batch from the buffer, convert uint8 to float32 only when sampling."""
         if self._current_size < batch_size:
             return None
         
@@ -186,13 +219,14 @@ class TorchRLPrioritizedReplayBuffer:
                 priority_key="td_error"
             )
             
-            # Sample from TorchRL buffer (still on CPU)
+            # Sample from TorchRL buffer (still on CPU, still uint8)
             sampled_tensordict = temp_buffer.sample()
             
-            # TorchRL should now naturally create proper batch dimensions:
-            # state: [batch_size, 8, 128, 128], action: [batch_size], etc.
+            # Convert uint8 states to float32 for training (on CPU first, then move to GPU)
+            sampled_tensordict["state"] = sampled_tensordict["state"].float()
+            sampled_tensordict["next_state"] = sampled_tensordict["next_state"].float()
             
-            # NOW move only the sampled batch to GPU for training
+            # NOW move the converted batch to GPU for training
             sampled_tensordict = sampled_tensordict.to(DEVICE)
             
             return sampled_tensordict
@@ -358,11 +392,21 @@ class MarioAgent:
 
                 # Experience replay - use TorchRL PrioritizedReplayBuffer if available
         if TORCHRL_AVAILABLE:
-            print("Using TorchRL PrioritizedReplayBuffer")
+            print("Using TorchRL PrioritizedReplayBuffer (Memory-Efficient uint8 storage)")
             self.memory = TorchRLPrioritizedReplayBuffer(memory_size)
+            # Calculate memory savings
+            uint8_gb = memory_size * (8 * 128 * 128 * 2) / (1024**3)  # 2 states per experience
+            float32_gb = uint8_gb * 4  # float32 is 4x larger than uint8
+            print(f"[MEMORY] Buffer will use ~{uint8_gb:.1f}GB instead of {float32_gb:.1f}GB")
+            print(f"[MEMORY] Saving {float32_gb - uint8_gb:.1f}GB (~{((float32_gb - uint8_gb) / float32_gb * 100):.0f}% reduction)")
         else:
-            print("Using StandardReplayBuffer (TorchRL not available)")
+            print("Using StandardReplayBuffer (Memory-Efficient uint8 storage)")
             self.memory = StandardReplayBuffer(memory_size)
+            # Calculate memory savings
+            uint8_gb = memory_size * (8 * 128 * 128 * 2) / (1024**3)  # 2 states per experience
+            float32_gb = uint8_gb * 4  # float32 is 4x larger than uint8
+            print(f"[MEMORY] Buffer will use ~{uint8_gb:.1f}GB instead of {float32_gb:.1f}GB")
+            print(f"[MEMORY] Saving {float32_gb - uint8_gb:.1f}GB (~{((float32_gb - uint8_gb) / float32_gb * 100):.0f}% reduction)")
 
     def act(self, state, epsilon_override=None):
         epsilon = self.epsilon
