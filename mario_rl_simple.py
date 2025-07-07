@@ -255,7 +255,13 @@ def main():
                 
                 # Check for episode end
                 if done or (MAX_STEPS_PER_RUN > 0 and step_count >= MAX_STEPS_PER_RUN):
-                    distances.append(episode_distance)
+                    # Only track distance for episodes that started from level beginning
+                    if hasattr(env, 'get_used_recorded_start') and not env.get_used_recorded_start():
+                        distances.append(episode_distance)
+                    elif not hasattr(env, 'get_used_recorded_start'):
+                        # Fallback: if wrapper not present, assume level start
+                        distances.append(episode_distance)
+                    
                     episode_count += 1
                     
                     # Reset for next episode

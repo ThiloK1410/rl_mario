@@ -1,34 +1,22 @@
 # Configuration constants for Mario RL training
 
-# Data file for logging training progress
-DATA_FILE = "training_log.csv"
-
 # folder where agent gets saved to and loaded from
 AGENT_FOLDER = "checkpoints"
 
 # specifies if we want to train on all stages or just the first
 RANDOM_STAGES = False
 
-# number of processes collecting experiences
-# ( this is CPU expensive and the amount of collected experiences is capped by REP_Q_SIZE => finetuning for machine necessary)
-# OPTIMIZATION: Reduced from 4 to 2 processes to reduce CPU contention
-NUM_PROCESSES = 2
-
 # Interval at which the model will be saved
 SAVE_INTERVAL = 100
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# SAMPLE CONTROL ( ratio recommendation: (BATCH_SIZE * EPISODES_PER_EPOCH) / REP_Q_SIZE ≈ 8 )
+# SAMPLE CONTROL
 # ----------------------------------------------------------------------------------------------------------------------
 
 # The size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
 BUFFER_SIZE = 10000
-
-# Maximum size of the queue where collector processes store replays,
-# the limit is for when the collector threads outpace the main thread
-REP_Q_SIZE = 2000
 
 # The batch size for the agents policy training
 BATCH_SIZE = 256
@@ -52,7 +40,7 @@ NUM_EPOCHS = 20000
 MAX_STEPS_PER_RUN = 0
 
 # starting learning rate for the neural network
-LEARNING_RATE = 0.002
+LEARNING_RATE = 0.0005
 
 # Learning rate decay factor
 LR_DECAY_FACTOR = 0.8
@@ -73,20 +61,6 @@ EPSILON_MIN = 0.1
 # gamma = 1 future rewards are as valuable as immediate ones
 # gamma = 0 only immediate rewards matter
 GAMMA = 0.95
-
-
-# ----------------------------------------------------------------------------------------------------------------------
-# PERFORMANCE OPTIMIZATIONS
-# ----------------------------------------------------------------------------------------------------------------------
-
-# Model update frequency - only update collector models every N epochs to reduce overhead
-MODEL_UPDATE_FREQUENCY = 3  # Update every 3 epochs instead of every epoch
-
-# Enable mixed precision training for faster GPU operations
-USE_MIXED_PRECISION = True
-
-# Reduce model synchronization overhead by updating collectors less frequently
-ASYNC_MODEL_UPDATES = True
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -164,3 +138,37 @@ MIN_CHECKPOINT_X_POS = 100
 
 # Whether to keep only one recording per stage (new recordings overwrite old ones)
 ONE_RECORDING_PER_STAGE = True
+
+# Sampling range for recorded gameplay (to avoid getting stuck in late stages)
+MIN_SAMPLING_PERCENTAGE = 0.30  # Start sampling from 30% through the action sequence
+MAX_SAMPLING_PERCENTAGE = 0.85  # End sampling at 85% through the action sequence
+
+
+# ======================================================================================================================
+# DEPRECATED PARAMETERS - ONLY USED BY mario_rl.py (DEPRECATED THREADED VERSION)
+# ======================================================================================================================
+
+# Data file for logging training progress (CSV format)
+DATA_FILE = "training_log.csv"
+
+# number of processes collecting experiences
+# ( this is CPU expensive and the amount of collected experiences is capped by REP_Q_SIZE => finetuning for machine necessary)
+# OPTIMIZATION: Reduced from 4 to 2 processes to reduce CPU contention
+NUM_PROCESSES = 2
+
+# Maximum size of the queue where collector processes store replays,
+# the limit is for when the collector threads outpace the main thread
+# ( ratio recommendation: (BATCH_SIZE * EPISODES_PER_EPOCH) / REP_Q_SIZE ≈ 8 )
+REP_Q_SIZE = 2000
+
+# Model update frequency - only update collector models every N epochs to reduce overhead
+MODEL_UPDATE_FREQUENCY = 3  # Update every 3 epochs instead of every epoch
+
+# Enable mixed precision training for faster GPU operations
+USE_MIXED_PRECISION = True
+
+# Reduce model synchronization overhead by updating collectors less frequently
+ASYNC_MODEL_UPDATES = True
+
+# Random save state usage (used in old environment wrapper)
+RANDOM_SAVES = False

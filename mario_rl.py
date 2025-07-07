@@ -565,8 +565,13 @@ def collector_process(experience_queue, model_queue, distance_queue, stop_event,
                           f"Random: {random_action_count:,}, Model updates: {model_update_count}")
                     last_performance_print = current_time
 
+                # Only track distance for episodes that started from level beginning
                 if best_x != start_x:
-                    distance_queue.put(best_x - start_x)
+                    if hasattr(env, 'get_used_recorded_start') and not env.get_used_recorded_start():
+                        distance_queue.put(best_x - start_x)
+                    elif not hasattr(env, 'get_used_recorded_start'):
+                        # Fallback: if wrapper not present, assume level start
+                        distance_queue.put(best_x - start_x)
 
             except Exception as e:
                 print(f"[Collector {id}] Error in episode loop: {str(e)}")

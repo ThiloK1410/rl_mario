@@ -308,6 +308,152 @@ Examples:
 - **Use hyperparameter sweeps** to find optimal settings
 - **Archive successful experiments** for future reference
 
+## 🎬 Recorded Gameplay System
+
+The project includes a sophisticated recorded gameplay system that allows the agent to start training from diverse positions within levels, significantly improving training efficiency and state coverage.
+
+### 🎯 How It Works
+
+The recorded gameplay system captures human gameplay as **action sequences** (lists of integers) that can be deterministically replayed. During training, the agent can start from random positions within these recordings instead of always starting from the beginning of the level.
+
+### 🎮 Recording New Gameplay
+
+To record gameplay for a specific level:
+
+1. **Run the play script:**
+```bash
+python play_mario.py
+```
+
+2. **Select your level** when prompted (e.g., World 1-1, World 1-2, etc.)
+
+3. **Play through the level:**
+   - Use arrow keys for movement
+   - **A** = A button (jump)
+   - **S** = B button (run/fireball)
+   - **R** or **F5** = Reset and start over
+   - Recording starts automatically each episode
+
+4. **Complete the level** by reaching the flagpole
+
+5. **Save when prompted:**
+   - The game will ask: "Save this recording? (y/n)"
+   - Type **y** to save successful runs
+   - Type **n** to discard unsuccessful attempts
+
+### 📁 Recording Storage
+
+Recordings are stored in the `recorded_gameplay/` directory:
+```
+recorded_gameplay/
+├── world_1_stage_1/
+│   └── actions_20250707_165001.json
+├── world_1_stage_2/
+│   └── actions_20250707_170245.json
+└── world_2_stage_1/
+    └── actions_20250707_172130.json
+```
+
+Each recording contains:
+- **Action sequence**: List of integers representing button presses
+- **Level info**: World and stage numbers
+- **Completion data**: Final position, score, and success status
+
+### 🔄 Recording Overwrite Behavior
+
+**Important: One Recording Per Level**
+
+The system is configured with `ONE_RECORDING_PER_STAGE = True`, which means:
+- ✅ **New recordings replace old ones** for the same level
+- ✅ **Always keeps the most recent recording** 
+- ✅ **Prevents accumulation of outdated recordings**
+- ✅ **Ensures consistent training behavior**
+
+When you record a new playthrough of World 1-1, it will overwrite the previous World 1-1 recording.
+
+### 🎯 Training Integration
+
+The recorded gameplay system provides major training benefits:
+
+**Random Starting Positions:**
+- Agent starts from **30-85%** through the level (configurable)
+- Provides **diverse state coverage** instead of always starting from beginning
+- Focuses on **productive middle-to-late positions** where agent can explore
+
+**Configuration Options** (`config.py`):
+```python
+USE_RECORDED_GAMEPLAY = True          # Enable recorded gameplay
+RECORDED_START_PROBABILITY = 0.8      # 80% chance to use recorded start
+PREFER_ADVANCED_CHECKPOINTS = True    # Focus on middle-to-late positions
+MIN_SAMPLING_PERCENTAGE = 0.30        # Start sampling from 30% through level
+MAX_SAMPLING_PERCENTAGE = 0.85        # End sampling at 85% through level
+```
+
+**Training Benefits:**
+- **Better state coverage** - Agent experiences more diverse game states
+- **Improved exploration** - Less time spent on early, easy sections
+- **Faster learning** - More training on challenging middle/late game content
+- **Enhanced performance** - Better understanding of level mechanics
+
+### 🗂️ Git Integration
+
+**Recordings Should Be Committed to Git**
+
+Unlike model checkpoints which are large and frequently changing, recordings are:
+- ✅ **Small JSON files** (~50KB each)
+- ✅ **Stable and reusable** across different training runs
+- ✅ **Essential for reproducible training** 
+- ✅ **Shared resource** for all team members
+
+**Recommended Git Workflow:**
+```bash
+# Add new recordings to git
+git add recorded_gameplay/
+git commit -m "Add World 1-3 gameplay recording"
+git push origin main
+```
+
+**Why Include in Git:**
+- **Reproducible experiments** - Others can use the same starting positions
+- **Consistent training** - All team members get the same training diversity
+- **Backup and versioning** - Recordings are preserved across machines
+- **Easy collaboration** - Share good gameplay recordings with team
+
+### 🎲 Recording Requirements
+
+**For Optimal Training Coverage:**
+
+1. **One recording per level** you want to train on
+2. **Complete successful runs** (reach the flagpole)
+3. **Quality gameplay** - avoid getting stuck or dying frequently
+4. **Diverse paths** - explore different routes through levels when possible
+
+**Recommended Recording Priority:**
+1. **World 1-1** - Essential for basic training
+2. **World 1-2** - Underground level mechanics
+3. **World 1-3** - Platform jumping skills
+4. **World 1-4** - Castle/boss encounters
+5. **Additional worlds** - As needed for advanced training
+
+### 🔧 Troubleshooting Recordings
+
+**Common Issues:**
+
+**Recording not saving:**
+- Make sure you reached the flagpole (`flag_get = True`)
+- Check that the recording directory exists
+- Verify you answered 'y' to save the recording
+
+**Training not using recordings:**
+- Check `USE_RECORDED_GAMEPLAY = True` in config
+- Ensure recording files exist in `recorded_gameplay/world_X_stage_Y/`
+- Verify `RECORDED_START_PROBABILITY > 0.0`
+
+**Agent getting stuck:**
+- Recordings may have positions that are too advanced
+- Adjust `MAX_SAMPLING_PERCENTAGE` to lower value (e.g., 0.80)
+- Record new gameplay with more conservative routes
+
 ## 🎮 Training Tips
 
 ### For Best Results
@@ -316,7 +462,8 @@ Examples:
 2. **Monitor TensorBoard** - Watch for training issues early
 3. **Experiment with hyperparameters** - Learning rate, epsilon decay
 4. **Use PER buffer** - 48.9% more efficient than standard replay
-5. **Run longer training** - Mario is complex, needs many episodes
+5. **Use recorded gameplay** - Better state coverage and faster learning
+6. **Run longer training** - Mario is complex, needs many episodes
 
 ### Common Issues
 

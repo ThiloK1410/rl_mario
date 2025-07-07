@@ -16,7 +16,8 @@ from config import (
     DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD,
     ITEM_REWARD_FACTOR, RANDOM_STAGES, SCORE_REWARD_FACTOR,
     USE_RECORDED_GAMEPLAY, RECORDED_GAMEPLAY_DIR, RECORDED_START_PROBABILITY,
-    PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE, MOVE_REWARD
+    PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE, MOVE_REWARD,
+    MIN_SAMPLING_PERCENTAGE, MAX_SAMPLING_PERCENTAGE
 )
 
 
@@ -273,10 +274,14 @@ class RecordedGameplayWrapper(gym.Wrapper):
         super().__init__(env)
         self.recorded_sessions = {}  # Cache for loaded sessions
         self.last_loaded_stage = None
+        self.used_recorded_start = False  # Track if current episode used recorded start
 
     def reset(self, **kwargs):
         """Reset environment and optionally replay actions to a random position."""
         obs = self.env.reset(**kwargs)
+        
+        # Reset the flag
+        self.used_recorded_start = False
         
         # Check if we should use recorded gameplay
         if USE_RECORDED_GAMEPLAY and random.random() < RECORDED_START_PROBABILITY:
@@ -285,7 +290,7 @@ class RecordedGameplayWrapper(gym.Wrapper):
 
             # Try to replay actions to a random position
             if self._replay_to_random_position(world, stage):
-                print(f"🎯 Started from recorded position - World {world}-{stage}")
+                self.used_recorded_start = True
 
         return obs
     
@@ -366,12 +371,17 @@ class RecordedGameplayWrapper(gym.Wrapper):
             
             # Choose a random position in the action sequence
             if PREFER_ADVANCED_CHECKPOINTS:
-                # Weight towards later positions (more advanced in level)
-                max_actions = len(actions)
-                # Use a power distribution to favor later positions
-                position = int(max_actions * (random.random() ** 0.5))
+                # Focus on the productive middle-to-late range (configurable)
+                # This avoids early positions (too easy) and very late positions (agent gets stuck)
+                min_position = int(len(actions) * MIN_SAMPLING_PERCENTAGE)
+                max_position = int(len(actions) * MAX_SAMPLING_PERCENTAGE)
+                
+                # Use power distribution within this range to favor later positions
+                # random() ** 0.7 gives moderate bias towards later positions
+                relative_position = random.random() ** 0.7
+                position = min_position + int((max_position - min_position) * relative_position)
             else:
-                # Uniform distribution
+                # Uniform distribution across the full range
                 position = random.randint(0, len(actions) - 1)
             
             # Replay actions up to the chosen position
@@ -413,5 +423,17 @@ def create_env(use_level_start=False):
     env = DeadlockEnv(env, threshold=DEADLOCK_STEPS, deadlock_penalty=DEADLOCK_PENALTY)
     # Apply RewardShaperEnv LAST to completely overwrite all rewards
     env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY, score_reward_factor=SCORE_REWARD_FACTOR)
+
+    # Add helper method to access recorded start flag through wrapper chain
+    def get_used_recorded_start():
+        """Helper method to find RecordedGameplayWrapper in the wrapper chain."""
+        current_env = env
+        while hasattr(current_env, 'env'):
+            if hasattr(current_env, 'used_recorded_start'):
+                return current_env.used_recorded_start
+            current_env = current_env.env
+        return False  # Default to False if no RecordedGameplayWrapper found
+    
+    env.get_used_recorded_start = get_used_recorded_start
 
     return env
