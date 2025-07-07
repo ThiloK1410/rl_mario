@@ -9,9 +9,9 @@ import os
 from environment import create_env
 from dqn_agent import MarioAgent, DEVICE
 from config import (
-    BUFFER_SIZE, NUM_EPOCHS, MAX_STEPS_PER_RUN, BATCH_SIZE, 
-    EPISODES_PER_EPOCH, LEARNING_RATE, SAVE_INTERVAL, EPSILON_START, 
-    EPSILON_DECAY, EPSILON_MIN, GAMMA, AGENT_FOLDER, RANDOM_STAGES
+    BUFFER_SIZE, NUM_EPOCHS, MAX_STEPS_PER_RUN, BATCH_SIZE,
+    EPISODES_PER_EPOCH, LEARNING_RATE, SAVE_INTERVAL, EPSILON_START,
+    EPSILON_DECAY, EPSILON_MIN, GAMMA, AGENT_FOLDER, RANDOM_STAGES, REUSE_FACTOR
 )
 
 # Configuration: Set to False, to use Standard Replay Buffer (for comparison)
@@ -170,7 +170,7 @@ def main():
         print(f"[CHECKPOINT] Using checkpoint for experiment '{tb_logger.experiment_name}': {latest_checkpoint}")
     
     # Training parameters - ADJUSTED for more frequent training
-    reuse_ratio_threshold = 5.0
+    reuse_ratio_threshold = REUSE_FACTOR
     
     # Log hyperparameters at the start (only for new experiments)
     if not loaded_experiment_name:

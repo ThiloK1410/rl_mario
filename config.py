@@ -7,7 +7,7 @@ DATA_FILE = "training_log.csv"
 AGENT_FOLDER = "checkpoints"
 
 # specifies if we want to train on all stages or just the first
-RANDOM_STAGES = True
+RANDOM_STAGES = False
 
 # number of processes collecting experiences
 # ( this is CPU expensive and the amount of collected experiences is capped by REP_Q_SIZE => finetuning for machine necessary)
@@ -31,10 +31,14 @@ BUFFER_SIZE = 10000
 REP_Q_SIZE = 2000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 1024
+BATCH_SIZE = 256
+
+# controls how much experiences needs to be collected before we can start the next epoch
+# exp_collected = (BATCH_SIZE * EPISODES_PER_EPOCH) / REUSE_FACTOR
+REUSE_FACTOR = 10.0
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 4
+EPISODES_PER_EPOCH = 8
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000
@@ -60,7 +64,7 @@ LR_DECAY_RATE = 50
 EPSILON_START = 1
 
 # How much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.002
+EPSILON_DECAY = 0.005
 
 # Minimum epsilon value
 EPSILON_MIN = 0.1
@@ -131,3 +135,28 @@ PER_BETA = 0.4
 # beta gradually increases to 1.0 during training for full bias correction
 # Typical values: 0.001-0.0001 depending on training length
 PER_BETA_INCREMENT = 0.001
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# RECORDED GAMEPLAY RANDOM START PARAMETERS
+# ----------------------------------------------------------------------------------------------------------------------
+
+# Enable using recorded gameplay for random start locations
+USE_RECORDED_GAMEPLAY = True
+
+# Directory where recorded gameplay sessions are stored
+RECORDED_GAMEPLAY_DIR = "recorded_gameplay"
+
+# Probability of using a recorded start position when available (0.0 to 1.0)
+# 1.0 = always use recorded start if available, 0.0 = never use recorded starts
+RECORDED_START_PROBABILITY = 0.8
+
+# Whether to prefer checkpoints that are further in the level
+# True = weight checkpoints by x_pos, False = equal probability for all checkpoints
+PREFER_ADVANCED_CHECKPOINTS = True
+
+# Minimum x_pos to consider for random starts (avoid very early checkpoints)
+MIN_CHECKPOINT_X_POS = 100
+
+# Whether to keep only one recording per stage (new recordings overwrite old ones)
+ONE_RECORDING_PER_STAGE = True
