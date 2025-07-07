@@ -13,10 +13,10 @@ import glob
 import json
 
 from config import (
-    DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD, 
+    DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD,
     ITEM_REWARD_FACTOR, RANDOM_STAGES, SCORE_REWARD_FACTOR,
     USE_RECORDED_GAMEPLAY, RECORDED_GAMEPLAY_DIR, RECORDED_START_PROBABILITY,
-    PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE
+    PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE, MOVE_REWARD
 )
 
 
@@ -169,9 +169,9 @@ class RewardShaperEnv(gym.Wrapper):
         self.last_x_pos = None  # Will be set on first step
         self.last_life = 2  # Track life to detect death
         # reward = distance * factor
-        self.pos_mov_factor = 1.0 / 12.0
+        self.pos_mov_factor = MOVE_REWARD
         # separate factor for moving backwards
-        self.neg_mov_factor = self.pos_mov_factor / 2.0
+        self.neg_mov_factor = MOVE_REWARD / 2.0
 
         self.last_score = 0
         self.score_reward_scale = score_reward_factor
@@ -207,7 +207,7 @@ class RewardShaperEnv(gym.Wrapper):
         else:
             # Handle movement reward
             current_x_pos = info['x_pos']
-            
+
             if self.first_step:
                 # First step after reset: set initial position without movement reward
                 self.last_x_pos = current_x_pos
@@ -220,7 +220,7 @@ class RewardShaperEnv(gym.Wrapper):
                     reward += distance_moved * self.pos_mov_factor
                 else:
                     reward += distance_moved * self.neg_mov_factor
-                
+
                 # Update position tracking
                 self.last_x_pos = current_x_pos
         
@@ -273,7 +273,7 @@ class RecordedGameplayWrapper(gym.Wrapper):
         super().__init__(env)
         self.recorded_sessions = {}  # Cache for loaded sessions
         self.last_loaded_stage = None
-        
+
     def reset(self, **kwargs):
         """Reset environment and optionally replay actions to a random position."""
         obs = self.env.reset(**kwargs)
@@ -282,11 +282,11 @@ class RecordedGameplayWrapper(gym.Wrapper):
         if USE_RECORDED_GAMEPLAY and random.random() < RECORDED_START_PROBABILITY:
             # Get current stage info
             world, stage = self._get_current_stage_info()
-            
+
             # Try to replay actions to a random position
             if self._replay_to_random_position(world, stage):
                 print(f"🎯 Started from recorded position - World {world}-{stage}")
-            
+
         return obs
     
     def _get_current_stage_info(self):
@@ -303,22 +303,22 @@ class RecordedGameplayWrapper(gym.Wrapper):
     def _load_recorded_sessions(self, world, stage):
         """Load recorded sessions for a specific world/stage."""
         stage_key = f"world_{world}_stage_{stage}"
-        
+
         # Check if already loaded
         if stage_key in self.recorded_sessions:
             return self.recorded_sessions[stage_key]
-        
+
         # Find recorded action files for this stage
         stage_dir = os.path.join(RECORDED_GAMEPLAY_DIR, stage_key)
         if not os.path.exists(stage_dir):
             self.recorded_sessions[stage_key] = []
             return []
-        
+
         action_files = glob.glob(os.path.join(stage_dir, "actions_*.json"))
         if not action_files:
             self.recorded_sessions[stage_key] = []
             return []
-        
+
         # Load sessions
         sessions = []
         if ONE_RECORDING_PER_STAGE:
@@ -346,10 +346,10 @@ class RecordedGameplayWrapper(gym.Wrapper):
                 except Exception as e:
                     print(f"Warning: Failed to load {action_file}: {e}")
                     continue
-        
+
         self.recorded_sessions[stage_key] = sessions
         return sessions
-    
+
     def _replay_to_random_position(self, world, stage):
         """Replay actions to reach a random position."""
         try:
@@ -400,7 +400,7 @@ def create_env(use_level_start=False):
     # Apply recorded gameplay wrapper early (before preprocessing) so it can control the initial state
     if USE_RECORDED_GAMEPLAY and not use_level_start:
         env = RecordedGameplayWrapper(env)
-    
+
     # Apply all the preprocessing wrappers
     env = GrayScaleObservation(env)
     env = ResizeObservation(env, 128)
@@ -413,5 +413,5 @@ def create_env(use_level_start=False):
     env = DeadlockEnv(env, threshold=DEADLOCK_STEPS, deadlock_penalty=DEADLOCK_PENALTY)
     # Apply RewardShaperEnv LAST to completely overwrite all rewards
     env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY, score_reward_factor=SCORE_REWARD_FACTOR)
-    
+
     return env

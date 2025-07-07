@@ -64,7 +64,7 @@ LR_DECAY_RATE = 50
 EPSILON_START = 1
 
 # How much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.005
+EPSILON_DECAY = 0.001
 
 # Minimum epsilon value
 EPSILON_MIN = 0.1
@@ -94,7 +94,11 @@ ASYNC_MODEL_UPDATES = True
 # ----------------------------------------------------------------------------------------------------------------------
 
 # If an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 30
+DEADLOCK_STEPS = 40
+
+# how much the reward for moving should be factored in, moving backwards is half that
+# 1/12 roughly normalizes to 1
+MOVE_REWARD = 1.0 / 6.0
 
 # reward penalty for getting stuck (absolute value)
 DEADLOCK_PENALTY = 0.5
@@ -106,7 +110,7 @@ DEATH_PENALTY = 1.0
 COMPLETION_REWARD = 2.0
 
 # factors the amount mario gets rewarded for gaining item effects
-ITEM_REWARD_FACTOR = 2.0
+ITEM_REWARD_FACTOR = 0.0
 
 # how much gaining score should be factored in the reward function,
 # score is very high so keep this factor low (ca. 0.01)
@@ -123,7 +127,7 @@ AGENT_TAU = 0.01
 # alpha = 0: uniform random sampling (no prioritization)
 # alpha = 1: full prioritization based on TD error
 # Typical values: 0.6-0.7 for good balance between exploration and exploitation
-PER_ALPHA = 0.7
+PER_ALPHA = 0.6
 
 # PER beta parameter - controls importance sampling correction
 # beta = 0: no correction for bias introduced by prioritization
