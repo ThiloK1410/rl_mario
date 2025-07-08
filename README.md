@@ -80,12 +80,7 @@ This will:
 - **Efficient training** - Uses PER for 48.9% better learning efficiency
 - **Flexible buffer types** - Easy switching between PER and standard replay
 
-### Alternative Training (Legacy)
 
-For the original parallel training pipeline:
-```bash
-python mario_rl.py
-```
 
 ### TensorBoard Visualization
 
@@ -184,9 +179,10 @@ The project consists of several key components:
    - Provides observation space normalization
    - Supports random stage selection and save states
 
-3. **Training Pipelines**:
-   - **`mario_rl_simple.py`** *(Recommended)*: Simplified training with TensorBoard integration
-   - **`mario_rl.py`**: Original parallel training pipeline
+3. **Training Pipeline**:
+   - **`mario_rl_simple.py`**: Main training pipeline with TensorBoard integration
+   - Batch experience collection for improved performance
+   - Adaptive reuse ratio for efficient training
    - Checkpoint saving and loading
    - Configurable training parameters
 

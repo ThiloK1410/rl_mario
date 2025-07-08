@@ -17,7 +17,7 @@ from config import (
     ITEM_REWARD_FACTOR, RANDOM_STAGES, SCORE_REWARD_FACTOR,
     USE_RECORDED_GAMEPLAY, RECORDED_GAMEPLAY_DIR, RECORDED_START_PROBABILITY,
     PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE, MOVE_REWARD,
-    MIN_SAMPLING_PERCENTAGE, MAX_SAMPLING_PERCENTAGE
+    MIN_SAMPLING_PERCENTAGE, MAX_SAMPLING_PERCENTAGE, MOVE_REWARD_CAP
 )
 
 
@@ -156,8 +156,8 @@ class LevelLimitEnv(gym.Wrapper):
     def step(self, action):
         state, reward, done, info = self.env.step(action)
 
-        # if mario reached flag end episode and give reward
-        if info['flag_get']:
+        # Check for level completion using only flag_get
+        if info.get('flag_get', False):
             done = True
             reward += self.completion_reward
 
@@ -192,8 +192,6 @@ class RewardShaperEnv(gym.Wrapper):
     def step(self, action):
         state, reward, done, info = self.env.step(action)
 
-        reward = 0
-
         # Calculate score reward
         current_score = info.get('score', 0)
         score_reward = (current_score - self.last_score) * self.score_reward_scale
@@ -218,9 +216,13 @@ class RewardShaperEnv(gym.Wrapper):
                 # Normal movement - calculate movement reward
                 distance_moved = current_x_pos - self.last_x_pos
                 if distance_moved > 0:
-                    reward += distance_moved * self.pos_mov_factor
+                    move_reward = distance_moved * self.pos_mov_factor
                 else:
-                    reward += distance_moved * self.neg_mov_factor
+                    move_reward = distance_moved * self.neg_mov_factor
+                
+                # Cap the movement reward to prevent it from overwhelming other signals
+                move_reward = max(-MOVE_REWARD_CAP, min(MOVE_REWARD_CAP, move_reward))
+                reward += move_reward
 
                 # Update position tracking
                 self.last_x_pos = current_x_pos
@@ -297,7 +299,30 @@ class RecordedGameplayWrapper(gym.Wrapper):
     def _get_current_stage_info(self):
         """Get current world and stage from environment."""
         try:
-            # Take a no-op step to get info
+            # Access the underlying environment to get stage info without consuming frames
+            # Navigate through the wrapper chain to find the base Mario environment
+            current_env = self.env
+            while hasattr(current_env, 'env'):
+                if hasattr(current_env, 'spec') and current_env.spec and 'SuperMarioBros' in current_env.spec.id:
+                    # Found the base Mario environment
+                    break
+                current_env = current_env.env
+            
+            # Try to get stage info from the environment spec or take a minimal step
+            if hasattr(current_env, 'spec') and current_env.spec:
+                spec_id = current_env.spec.id
+                if 'SuperMarioBros-' in spec_id:
+                    # Extract world and stage from spec ID (e.g., "SuperMarioBros-1-1-v0")
+                    parts = spec_id.split('-')
+                    if len(parts) >= 3:
+                        try:
+                            world = int(parts[1])
+                            stage = int(parts[2])
+                            return world, stage
+                        except ValueError:
+                            pass
+            
+            # Fallback: take a no-op step to get info (now at the correct abstraction level)
             obs, reward, done, info = self.env.step(0)
             world = info.get('world', 1)
             stage = info.get('stage', 1)
@@ -406,23 +431,27 @@ class RecordedGameplayWrapper(gym.Wrapper):
 def create_env(use_level_start=False):
     env = gym_super_mario_bros.make('SuperMarioBrosRandomStages-v0' if RANDOM_STAGES else 'SuperMarioBros-v0')
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
-    
-    # Apply recorded gameplay wrapper early (before preprocessing) so it can control the initial state
-    if USE_RECORDED_GAMEPLAY and not use_level_start:
-        env = RecordedGameplayWrapper(env)
 
     # Apply all the preprocessing wrappers
     env = GrayScaleObservation(env)
     env = ResizeObservation(env, 128)
     env = SkipFrame(env, skip=6)
+    
+    # Apply recorded gameplay wrapper AFTER SkipFrame to match recording level
+    # This ensures recorded actions are replayed at the same abstraction level they were recorded
+    if USE_RECORDED_GAMEPLAY and not use_level_start:
+        env = RecordedGameplayWrapper(env)
+    
     env = FrameStack(env, 8)
-    # Apply reward-modifying wrappers first
-    env = LifeLimitEnv(env, death_penalty=DEATH_PENALTY)
+    
+    # Apply RewardShaperEnv FIRST (it handles death penalty and movement rewards)
+    env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY, score_reward_factor=SCORE_REWARD_FACTOR)
+    
+    # Apply other reward-modifying wrappers that ADD to the shaped reward
+    env = LifeLimitEnv(env, death_penalty=0)  # No additional death penalty - RewardShaperEnv handles it
     env = LevelLimitEnv(env, completion_reward=COMPLETION_REWARD)
     env = ItemRewardEnv(env, item_reward_factor=ITEM_REWARD_FACTOR)
     env = DeadlockEnv(env, threshold=DEADLOCK_STEPS, deadlock_penalty=DEADLOCK_PENALTY)
-    # Apply RewardShaperEnv LAST to completely overwrite all rewards
-    env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY, score_reward_factor=SCORE_REWARD_FACTOR)
 
     # Add helper method to access recorded start flag through wrapper chain
     def get_used_recorded_start():

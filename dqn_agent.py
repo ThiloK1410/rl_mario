@@ -19,7 +19,7 @@ except ImportError:
     TORCHRL_AVAILABLE = False
     print("Warning: TorchRL not available, falling back to standard replay buffer")
 
-from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU, PER_ALPHA, PER_BETA, PER_BETA_INCREMENT
+from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU, PER_ALPHA, PER_BETA, PER_BETA_INCREMENT, USE_DUELING_NETWORK
 
 # Global device variable
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -67,6 +67,65 @@ class DQN(nn.Module):
         # Pass through the fully-connected layers to get Q-values
         return self.fc(conv_out)
 
+
+class DuelingDQN(nn.Module):
+    def __init__(self, input_shape, n_actions, input_channels=8):
+        super(DuelingDQN, self).__init__()
+
+        self.conv = nn.Sequential(
+            # The input is a stack of 4 grayscale 84x84 frames
+            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU()
+        )
+
+        conv_out_size = self._get_conv_out(input_shape, input_channels)
+
+        # Value stream - outputs a single value V(s)
+        self.value_stream = nn.Sequential(
+            nn.Linear(conv_out_size, 512),
+            nn.ReLU(),
+            nn.Linear(512, 1)
+        )
+
+        # Advantage stream - outputs advantage values A(s,a) for each action
+        self.advantage_stream = nn.Sequential(
+            nn.Linear(conv_out_size, 512),
+            nn.ReLU(),
+            nn.Linear(512, n_actions)
+        )
+
+    def _get_conv_out(self, shape, channels):
+        # Create a dummy tensor with a batch size of 1 to pass through the conv layers
+        o = self.conv(torch.zeros(1, channels, *shape))
+        # Flatten the output and get the total number of elements
+        return int(np.prod(o.size()))
+
+    def forward(self, x):
+        # The input x is expected to be a tensor of integers (0-255)
+        # with shape (batch_size, channels, height, width)
+
+        # Normalize pixel values to the [0, 1] range
+        fx = x.float() / 255.0
+
+        # Pass through convolutional layers and flatten the output
+        conv_out = self.conv(fx).flatten(start_dim=1)
+
+        # Separate value and advantage streams
+        value = self.value_stream(conv_out)  # Shape: (batch_size, 1)
+        advantage = self.advantage_stream(conv_out)  # Shape: (batch_size, n_actions)
+
+        # Combine value and advantage to get Q-values
+        # Q(s,a) = V(s) + A(s,a) - mean(A(s,a))
+        # Subtracting the mean helps with identifiability and stability
+        q_values = value + advantage - advantage.mean(dim=1, keepdim=True)
+
+        return q_values
+
+
 class StandardReplayBuffer:
     """
     Memory-efficient standard replay buffer that stores uint8 data
@@ -106,6 +165,21 @@ class StandardReplayBuffer:
         next_state = next_state.astype(np.float32)
         
         return state, action, reward, next_state, done, None, None
+
+    def push_batch(self, experiences):
+        """
+        Add multiple experiences to the buffer at once.
+        
+        Args:
+            experiences: List of (state, action, reward, next_state, done) tuples
+        """
+        if not experiences:
+            return
+        
+        # Add each experience individually
+        for experience in experiences:
+            state, action, reward, next_state, done = experience
+            self.push(state, action, reward, next_state, done)
 
     def update_priorities(self, indices, new_priorities):
         """No-op for compatibility with prioritized replay buffers."""
@@ -383,9 +457,16 @@ class MarioAgent:
         # tau describes the percentage the target network gets nudged to the q-network each step
         self.tau = AGENT_TAU
 
-        # Neural networks
-        self.q_network = DQN(state_shape, n_actions).to(DEVICE)
-        self.target_network = DQN(state_shape, n_actions).to(DEVICE)
+        # Neural networks - choose between DQN and DuelingDQN based on config
+        if USE_DUELING_NETWORK:
+            print("Using Dueling Network architecture")
+            self.q_network = DuelingDQN(state_shape, n_actions).to(DEVICE)
+            self.target_network = DuelingDQN(state_shape, n_actions).to(DEVICE)
+        else:
+            print("Using standard DQN architecture")
+            self.q_network = DQN(state_shape, n_actions).to(DEVICE)
+            self.target_network = DQN(state_shape, n_actions).to(DEVICE)
+        
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
 
         self.current_epoch = 0
@@ -430,6 +511,8 @@ class MarioAgent:
         total_reward = 0  # Track total reward for this replay session
         returned_loss = 0
         returned_td_error = 0
+        total_gradient_norm = 0  # Track total gradient norm across all batches
+        processed_batches = 0  # Count of successfully processed batches
 
         for _ in range(episodes):
             # Sample batch - now returns TensorDict or tuple depending on buffer type
@@ -509,8 +592,9 @@ class MarioAgent:
                     total_norm += param_norm.item() ** 2
             total_norm = total_norm ** 0.5
 
-            # Log this value to see how it changes over time
-            print(f"[AGENT] Gradient Norm: {total_norm}")
+            # Accumulate gradient norm for averaging
+            total_gradient_norm += total_norm
+            processed_batches += 1
 
             self.optimizer.step()
 
@@ -540,6 +624,11 @@ class MarioAgent:
         # Print current learning rate
         current_lr = self.optimizer.param_groups[0]['lr']
         print(f"[AGENT] Current learning rate: {current_lr}")
+
+        # Print average gradient norm across all batches
+        if processed_batches > 0:
+            avg_gradient_norm = total_gradient_norm / processed_batches
+            print(f"[AGENT] Average Gradient Norm: {avg_gradient_norm}")
 
         self.current_epoch += 1
         return current_lr, avg_reward, returned_loss, returned_td_error

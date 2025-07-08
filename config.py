@@ -16,20 +16,31 @@ SAVE_INTERVAL = 100
 
 # The size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 10000
+BUFFER_SIZE = 200000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 256
+BATCH_SIZE = 4096
+
+# Minimum number of experiences to collect before starting training
+# Must be >= BATCH_SIZE to ensure we can sample batches
+MIN_BUFFER_SIZE = 10000
+
+# Validate that MIN_BUFFER_SIZE is at least BATCH_SIZE
+if MIN_BUFFER_SIZE < BATCH_SIZE:
+    raise ValueError(f"MIN_BUFFER_SIZE ({MIN_BUFFER_SIZE}) must be >= BATCH_SIZE ({BATCH_SIZE})")
 
 # controls how much experiences needs to be collected before we can start the next epoch
 # exp_collected = (BATCH_SIZE * EPISODES_PER_EPOCH) / REUSE_FACTOR
-REUSE_FACTOR = 10.0
+REUSE_FACTOR = 32.0
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 8
+EPISODES_PER_EPOCH = 16
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000
+
+# Number of threads to use for parallel experience collection
+NUM_COLLECTION_THREADS = 8
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -68,11 +79,14 @@ GAMMA = 0.95
 # ----------------------------------------------------------------------------------------------------------------------
 
 # If an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 40
+DEADLOCK_STEPS = 30
 
 # how much the reward for moving should be factored in, moving backwards is half that
-# 1/12 roughly normalizes to 1
 MOVE_REWARD = 1.0 / 6.0
+
+# cap for move rewards to prevent them from overwhelming other reward signals
+# movement rewards will be clamped between -MOVE_REWARD_CAP and +MOVE_REWARD_CAP
+MOVE_REWARD_CAP = 2.0
 
 # reward penalty for getting stuck (absolute value)
 DEADLOCK_PENALTY = 0.5
@@ -88,10 +102,15 @@ ITEM_REWARD_FACTOR = 0.0
 
 # how much gaining score should be factored in the reward function,
 # score is very high so keep this factor low (ca. 0.01)
+# Enabled to provide intermediate feedback for collecting coins, defeating enemies, etc.
 SCORE_REWARD_FACTOR = 0.0
 
 # tau describes the percentage of how much the target networks aligns with the dqn each step
-AGENT_TAU = 0.01
+AGENT_TAU = 0.005
+
+# Whether to use Dueling Network architecture instead of standard DQN
+# Dueling Network separates value and advantage estimation for better performance
+USE_DUELING_NETWORK = True
 
 # ----------------------------------------------------------------------------------------------------------------------
 # PRIORITIZED EXPERIENCE REPLAY (PER) PARAMETERS
@@ -131,44 +150,17 @@ RECORDED_START_PROBABILITY = 0.8
 
 # Whether to prefer checkpoints that are further in the level
 # True = weight checkpoints by x_pos, False = equal probability for all checkpoints
-PREFER_ADVANCED_CHECKPOINTS = True
+PREFER_ADVANCED_CHECKPOINTS = False
 
 # Minimum x_pos to consider for random starts (avoid very early checkpoints)
-MIN_CHECKPOINT_X_POS = 100
+MIN_CHECKPOINT_X_POS = 0
 
 # Whether to keep only one recording per stage (new recordings overwrite old ones)
 ONE_RECORDING_PER_STAGE = True
 
 # Sampling range for recorded gameplay (to avoid getting stuck in late stages)
-MIN_SAMPLING_PERCENTAGE = 0.30  # Start sampling from 30% through the action sequence
-MAX_SAMPLING_PERCENTAGE = 0.85  # End sampling at 85% through the action sequence
+MIN_SAMPLING_PERCENTAGE = 0.20  # Start sampling from 30% through the action sequence
+MAX_SAMPLING_PERCENTAGE = 0.75  # End sampling at 85% through the action sequence
 
 
-# ======================================================================================================================
-# DEPRECATED PARAMETERS - ONLY USED BY mario_rl.py (DEPRECATED THREADED VERSION)
-# ======================================================================================================================
 
-# Data file for logging training progress (CSV format)
-DATA_FILE = "training_log.csv"
-
-# number of processes collecting experiences
-# ( this is CPU expensive and the amount of collected experiences is capped by REP_Q_SIZE => finetuning for machine necessary)
-# OPTIMIZATION: Reduced from 4 to 2 processes to reduce CPU contention
-NUM_PROCESSES = 2
-
-# Maximum size of the queue where collector processes store replays,
-# the limit is for when the collector threads outpace the main thread
-# ( ratio recommendation: (BATCH_SIZE * EPISODES_PER_EPOCH) / REP_Q_SIZE ≈ 8 )
-REP_Q_SIZE = 2000
-
-# Model update frequency - only update collector models every N epochs to reduce overhead
-MODEL_UPDATE_FREQUENCY = 3  # Update every 3 epochs instead of every epoch
-
-# Enable mixed precision training for faster GPU operations
-USE_MIXED_PRECISION = True
-
-# Reduce model synchronization overhead by updating collectors less frequently
-ASYNC_MODEL_UPDATES = True
-
-# Random save state usage (used in old environment wrapper)
-RANDOM_SAVES = False
