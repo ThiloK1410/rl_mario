@@ -182,7 +182,15 @@ class KeyboardController:
             'LEFT + B',       # 8
             'LEFT + A + B',   # 9
             'DOWN',           # 10
-            'UP'              # 11
+            'UP',             # 11
+            'A + B',          # 12
+            'DOWN + A',       # 13
+            'DOWN + B',       # 14
+            'DOWN + A + B',   # 15
+            'UP + A',         # 16  
+            'UP + B',         # 17
+            'UP + A + B',     # 18
+
         ]
         
         # Initialize pygame for keyboard input
@@ -243,10 +251,24 @@ class KeyboardController:
             return 6  # LEFT
         elif a_button:
             return 5  # A (jump)
+        elif a_button and b_button:
+            return 12 # A + B
         elif down:
             return 10  # DOWN
+        elif down and a_button:
+            return 13 # DOWN + A
+        elif down and b_button:
+            return 14 # DOWN + B
+        elif down and a_button and b_button:
+            return 15 # DOWN + A + B
         elif up:
             return 11  # UP
+        elif up and a_button:
+            return 16  # UP + A
+        elif up and b_button:
+            return 17  # UP + B
+        elif up and a_button and b_button:
+            return 18  # UP + A + B
         else:
             return 0  # NOOP
     
@@ -366,20 +388,21 @@ def main():
             
             total_episodes += 1
             print(f"\nStarting Episode {total_episodes}")
-            print("Game starting in 3 seconds... Press ESC to quit anytime.")
+            
+            #print("Game starting in 3 seconds... Press ESC to quit anytime.")
             
             # Brief countdown
-            for i in range(3, 0, -1):
-                if controller.quit_game:
-                    break
-                print(f"{i}...")
-                time.sleep(1)
+            #for i in range(3, 0, -1):
+            #    if controller.quit_game:
+            #        break
+            #    print(f"{i}...")
+            #    time.sleep(1)
             
-            if controller.quit_game:
-                break
+            #if controller.quit_game:
+            #    break
                 
-            print("GO!")
-            
+            #print("GO!")
+
             # Reset recorder and start recording automatically
             action_recorder.reset_recording()
             # Use selected level for recording
