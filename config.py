@@ -19,11 +19,11 @@ SAVE_INTERVAL = 100
 BUFFER_SIZE = 200000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 4096
+BATCH_SIZE = 2048
 
 # Minimum number of experiences to collect before starting training
 # Must be >= BATCH_SIZE to ensure we can sample batches
-MIN_BUFFER_SIZE = 10000
+MIN_BUFFER_SIZE = 30000
 
 # Validate that MIN_BUFFER_SIZE is at least BATCH_SIZE
 if MIN_BUFFER_SIZE < BATCH_SIZE:
@@ -31,10 +31,10 @@ if MIN_BUFFER_SIZE < BATCH_SIZE:
 
 # controls how much experiences needs to be collected before we can start the next epoch
 # exp_collected = (BATCH_SIZE * EPISODES_PER_EPOCH) / REUSE_FACTOR
-REUSE_FACTOR = 32.0
+REUSE_FACTOR = 8.0
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 16
+EPISODES_PER_EPOCH = 4
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000
@@ -51,13 +51,13 @@ NUM_COLLECTION_THREADS = 8
 MAX_STEPS_PER_RUN = 0
 
 # starting learning rate for the neural network
-LEARNING_RATE = 0.0005
+LEARNING_RATE = 0.001
 
 # Learning rate decay factor
-LR_DECAY_FACTOR = 0.8
+LR_DECAY_FACTOR = 0.9
 
 # Learning rate decay rate
-LR_DECAY_RATE = 50
+LR_DECAY_RATE = 200
 
 # Initial epsilon value for epsilon-greedy exploration
 EPSILON_START = 1
@@ -79,10 +79,10 @@ GAMMA = 0.95
 # ----------------------------------------------------------------------------------------------------------------------
 
 # If an agent does not improve (x-position) for this amount of steps, the run gets canceled
-DEADLOCK_STEPS = 30
+DEADLOCK_STEPS = 20
 
 # how much the reward for moving should be factored in, moving backwards is half that
-MOVE_REWARD = 1.0 / 6.0
+MOVE_REWARD = 1.0 / 12.0
 
 # cap for move rewards to prevent them from overwhelming other reward signals
 # movement rewards will be clamped between -MOVE_REWARD_CAP and +MOVE_REWARD_CAP
@@ -98,12 +98,12 @@ DEATH_PENALTY = 1.0
 COMPLETION_REWARD = 2.0
 
 # factors the amount mario gets rewarded for gaining item effects
-ITEM_REWARD_FACTOR = 0.0
+ITEM_REWARD_FACTOR = 2.0
 
 # how much gaining score should be factored in the reward function,
 # score is very high so keep this factor low (ca. 0.01)
 # Enabled to provide intermediate feedback for collecting coins, defeating enemies, etc.
-SCORE_REWARD_FACTOR = 0.0
+SCORE_REWARD_FACTOR = 0.01
 
 # tau describes the percentage of how much the target networks aligns with the dqn each step
 AGENT_TAU = 0.005
@@ -120,7 +120,7 @@ USE_DUELING_NETWORK = True
 # alpha = 0: uniform random sampling (no prioritization)
 # alpha = 1: full prioritization based on TD error
 # Typical values: 0.6-0.7 for good balance between exploration and exploitation
-PER_ALPHA = 0.6
+PER_ALPHA = 0.7
 
 # PER beta parameter - controls importance sampling correction
 # beta = 0: no correction for bias introduced by prioritization
@@ -146,7 +146,7 @@ RECORDED_GAMEPLAY_DIR = "recorded_gameplay"
 
 # Probability of using a recorded start position when available (0.0 to 1.0)
 # 1.0 = always use recorded start if available, 0.0 = never use recorded starts
-RECORDED_START_PROBABILITY = 0.8
+RECORDED_START_PROBABILITY = 0.7
 
 # Whether to prefer checkpoints that are further in the level
 # True = weight checkpoints by x_pos, False = equal probability for all checkpoints
@@ -160,7 +160,7 @@ ONE_RECORDING_PER_STAGE = True
 
 # Sampling range for recorded gameplay (to avoid getting stuck in late stages)
 MIN_SAMPLING_PERCENTAGE = 0.20  # Start sampling from 30% through the action sequence
-MAX_SAMPLING_PERCENTAGE = 0.75  # End sampling at 85% through the action sequence
+MAX_SAMPLING_PERCENTAGE = 0.80  # End sampling at 85% through the action sequence
 
 
 

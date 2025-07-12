@@ -45,7 +45,7 @@ def main():
             total_reward += reward
             state = next_state
             print(f"Step {current_step}\treward: {reward}\tx_position: {info['x_pos']}\ty_position: {info['y_pos']}\tstate: {info['status']}")
-            sleep(1.0/20.0)
+            sleep(1.0/20)
 
         print(f"total reward in episode {i}: {total_reward}")
 

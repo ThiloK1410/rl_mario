@@ -110,6 +110,23 @@ class ActionRecorder:
         actions_filename = f"actions_{session_id}.json"
         actions_path = os.path.join(session_dir, actions_filename)
         
+        # Convert numpy types to native Python types for JSON serialization
+        def convert_numpy_types(obj):
+            """Convert numpy types to native Python types recursively."""
+            if hasattr(obj, 'item'):  # numpy scalar
+                return obj.item()
+            elif isinstance(obj, dict):
+                return {key: convert_numpy_types(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            elif hasattr(obj, 'tolist'):  # numpy array
+                return obj.tolist()
+            else:
+                return obj
+        
+        # Prepare recording data with converted types
+        clean_final_info = convert_numpy_types(final_info) if final_info else {}
+        
         recording_data = {
             'actions': self.current_recording['actions'],
             'world': world,
@@ -117,16 +134,22 @@ class ActionRecorder:
             'start_time': self.current_recording['start_time'],
             'session_id': session_id,
             'total_actions': len(self.current_recording['actions']),
-            'final_info': final_info if final_info else {}
+            'final_info': clean_final_info
         }
         
-        with open(actions_path, 'w') as f:
-            json.dump(recording_data, f, indent=2)
+        # Write JSON safely with error handling
+        try:
+            with open(actions_path, 'w') as f:
+                json.dump(recording_data, f, indent=2)
+                f.flush()  # Ensure data is written to disk
+                
+            print(f"💾 SAVED ACTION RECORDING - {len(self.current_recording['actions'])} actions")
+            print(f"   File: {actions_path}")
+            return actions_path
             
-        print(f"💾 SAVED ACTION RECORDING - {len(self.current_recording['actions'])} actions")
-        print(f"   File: {actions_path}")
-        
-        return actions_path
+        except Exception as e:
+            print(f"❌ Error saving recording: {e}")
+            return None
     
     def list_recorded_actions(self):
         """List all recorded action sequences."""
@@ -170,6 +193,7 @@ class KeyboardController:
         self.quit_game = False
         self.reset_requested = False
         self.last_reset_time = 0
+        self.pygame_active = True
         self.action_meanings = [
             'NOOP',           # 0
             'RIGHT',          # 1  
@@ -201,11 +225,18 @@ class KeyboardController:
         
     def get_action(self):
         """Get current action based on pressed keys."""
-        if self.quit_game:
+        if self.quit_game or not self.pygame_active:
             return -1
         
         # Process pygame events
-        for event in pygame.event.get():
+        try:
+            events = pygame.event.get()
+        except:
+            # pygame may have been shut down
+            self.pygame_active = False
+            return -1
+            
+        for event in events:
             if event.type == pygame.QUIT:
                 self.quit_game = True
                 return -1
@@ -222,7 +253,12 @@ class KeyboardController:
                         return -2  # Special reset action
         
         # Get current key states
-        keys = pygame.key.get_pressed()
+        try:
+            keys = pygame.key.get_pressed()
+        except:
+            # pygame may have been shut down
+            self.pygame_active = False
+            return -1
         
         # Check key combinations in priority order
         right = keys[pygame.K_RIGHT]
@@ -278,7 +314,13 @@ class KeyboardController:
     
     def cleanup(self):
         """Clean up pygame resources."""
-        pygame.quit()
+        try:
+            pygame.quit()
+        except:
+            # pygame may already be quit - ignore errors
+            pass
+        finally:
+            self.pygame_active = False
 
 
 
@@ -471,19 +513,10 @@ def main():
                         print(f"Steps taken: {steps}")
                         print(f"Final x-position: {x_pos}")
                         
-                        # Close pygame display immediately
-                        try:
-                            pygame.display.quit()
-                            pygame.quit()
-                            print("🖼️ Display closed.")
-                        except:
-                            pass
-                        
-                        # Stop recording and ask if user wants to save
+                        # Stop recording and save BEFORE closing pygame
                         if action_recorder.recording:
                             action_recorder.stop_recording()
                             
-                            # Switch to console mode for user interaction
                             print("\n" + "="*50)
                             print("🎬 RECORDING COMPLETED!")
                             print(f"Actions recorded: {len(action_recorder.current_recording['actions'])}")
@@ -495,8 +528,9 @@ def main():
                                 try:
                                     save_choice = input("Save this recording? (y/n): ").lower().strip()
                                     if save_choice in ['y', 'yes']:
+                                        print("💾 Saving recording...")
                                         action_recorder.save_recording(info)
-                                        print("✅ Recording saved!")
+                                        print("✅ Recording saved successfully!")
                                         break
                                     elif save_choice in ['n', 'no']:
                                         print("❌ Recording discarded.")
@@ -506,6 +540,16 @@ def main():
                                 except (EOFError, KeyboardInterrupt):
                                     print("\n❌ Recording discarded.")
                                     break
+                        
+                        # NOW close pygame display after recording is safely saved
+                        try:
+                            pygame.display.quit()
+                            pygame.quit()
+                            controller.pygame_active = False  # Mark pygame as inactive
+                            print("🖼️ Display closed safely.")
+                        except:
+                            controller.pygame_active = False  # Mark pygame as inactive even if shutdown failed
+                            pass
                         
                         # End the game completely after flag completion
                         controller.quit_game = True
