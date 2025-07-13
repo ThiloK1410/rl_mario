@@ -378,11 +378,13 @@ The recorded gameplay system provides major training benefits:
 
 **Configuration Options** (`config.py`):
 ```python
-USE_RECORDED_GAMEPLAY = True          # Enable recorded gameplay
-RECORDED_START_PROBABILITY = 0.8      # 80% chance to use recorded start
-PREFER_ADVANCED_CHECKPOINTS = True    # Focus on middle-to-late positions
-MIN_SAMPLING_PERCENTAGE = 0.30        # Start sampling from 30% through level
-MAX_SAMPLING_PERCENTAGE = 0.85        # End sampling at 85% through level
+USE_RECORDED_GAMEPLAY = True                      # Enable recorded gameplay
+RECORDED_START_PROBABILITY_MIN = 0.2              # 20% chance at start of training
+RECORDED_START_PROBABILITY_MAX = 0.8              # 80% chance at end of curriculum
+RECORDED_START_PROBABILITY_INCREASE_EPOCHS = 1000 # Increase over 1000 epochs
+PREFER_ADVANCED_CHECKPOINTS = True                # Focus on middle-to-late positions
+MIN_SAMPLING_PERCENTAGE = 0.30                    # Start sampling from 30% through level
+MAX_SAMPLING_PERCENTAGE = 0.85                    # End sampling at 85% through level
 ```
 
 **Training Benefits:**
@@ -390,6 +392,27 @@ MAX_SAMPLING_PERCENTAGE = 0.85        # End sampling at 85% through level
 - **Improved exploration** - Less time spent on early, easy sections
 - **Faster learning** - More training on challenging middle/late game content
 - **Enhanced performance** - Better understanding of level mechanics
+- **Curriculum learning** - Gradually increases advanced start positions as training progresses
+
+### 🎓 Curriculum Learning
+
+The system implements **curriculum learning** for recorded start positions:
+
+**How it Works:**
+- **Early training** (epoch 0): Low probability (20%) of using recorded starts
+- **Training progresses**: Probability increases linearly over time
+- **Late training** (epoch 1000+): High probability (80%) of using recorded starts
+
+**Benefits:**
+- **Gradual difficulty increase** - Agent learns basics first, then advanced positions
+- **Better stability** - Prevents overwhelming novice agent with difficult starts
+- **Improved convergence** - Smoother learning curve throughout training
+- **Adaptive training** - Automatically adjusts challenge based on progress
+
+**Monitoring Progress:**
+- Watch **RecordedStart** value in console logs increase over time
+- View **Hyperparameters/Recorded_Start_Probability** in TensorBoard
+- Current probability calculated as: `min_prob + (max_prob - min_prob) * (epoch / max_epochs)`
 
 ### 🗂️ Git Integration
 
@@ -443,7 +466,7 @@ git push origin main
 **Training not using recordings:**
 - Check `USE_RECORDED_GAMEPLAY = True` in config
 - Ensure recording files exist in `recorded_gameplay/world_X_stage_Y/`
-- Verify `RECORDED_START_PROBABILITY > 0.0`
+- Verify `RECORDED_START_PROBABILITY_MIN > 0.0` and curriculum learning is progressing
 
 **Agent getting stuck:**
 - Recordings may have positions that are too advanced

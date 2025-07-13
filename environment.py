@@ -12,36 +12,15 @@ import pickle
 import glob
 import json
 
-# Define expanded action space to match recording environment
-# This matches the 19-action space used in play_mario.py
-EXPANDED_COMPLEX_MOVEMENT = [
-    ['NOOP'],           # 0
-    ['right'],          # 1
-    ['right', 'A'],     # 2
-    ['right', 'B'],     # 3
-    ['right', 'A', 'B'], # 4
-    ['A'],              # 5
-    ['left'],           # 6
-    ['left', 'A'],      # 7
-    ['left', 'B'],      # 8
-    ['left', 'A', 'B'], # 9
-    ['down'],           # 10
-    ['up'],             # 11
-    ['A', 'B'],         # 12 - NEW
-    ['down', 'A'],      # 13 - NEW
-    ['down', 'B'],      # 14 - NEW
-    ['down', 'A', 'B'], # 15 - NEW
-    ['up', 'A'],        # 16 - NEW
-    ['up', 'B'],        # 17 - NEW
-    ['up', 'A', 'B'],   # 18 - NEW
-]
+
 
 from config import (
     DEADLOCK_PENALTY, DEADLOCK_STEPS, DEATH_PENALTY, COMPLETION_REWARD,
     ITEM_REWARD_FACTOR, RANDOM_STAGES, SCORE_REWARD_FACTOR,
-    USE_RECORDED_GAMEPLAY, RECORDED_GAMEPLAY_DIR, RECORDED_START_PROBABILITY,
+    USE_RECORDED_GAMEPLAY, RECORDED_GAMEPLAY_DIR, get_recorded_start_probability,
     PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE, MOVE_REWARD,
-    MIN_SAMPLING_PERCENTAGE, MAX_SAMPLING_PERCENTAGE, MOVE_REWARD_CAP
+    MIN_SAMPLING_PERCENTAGE, MAX_SAMPLING_PERCENTAGE, MOVE_REWARD_CAP, DOWNSCALE_RESOLUTION, SKIPPED_FRAMES,
+    STACKED_FRAMES, USED_MOVESET, EXPANDED_COMPLEX_MOVEMENT
 )
 
 
@@ -342,13 +321,11 @@ class CustomRandomStageWrapper(gym.Wrapper):
             # Create new environment for this stage
             env_name = f'SuperMarioBros-{self.current_world}-{self.current_stage}-v0'
             new_env = gym_super_mario_bros.make(env_name)
-            new_env = JoypadSpace(new_env, EXPANDED_COMPLEX_MOVEMENT)
+            new_env = JoypadSpace(new_env, USED_MOVESET)
             
             # Update the underlying environment
             self.env = new_env
-            
 
-            
         except Exception as e:
             print(f"Warning: Failed to create environment for stage {self.current_world}-{self.current_stage}: {e}")
             # Fallback to World 1-1
@@ -357,7 +334,7 @@ class CustomRandomStageWrapper(gym.Wrapper):
                 if hasattr(self.env, 'close'):
                     self.env.close()
                 fallback_env = gym_super_mario_bros.make('SuperMarioBros-1-1-v0')
-                fallback_env = JoypadSpace(fallback_env, EXPANDED_COMPLEX_MOVEMENT)
+                fallback_env = JoypadSpace(fallback_env, USED_MOVESET)
                 self.env = fallback_env
             except:
                 pass  # Keep the existing env if fallback fails
@@ -380,9 +357,6 @@ class RecordedGameplayWrapper(gym.Wrapper):
         self.recorded_sessions = {}  # Cache for loaded sessions
         self.last_loaded_stage = None
         self.used_recorded_start = False  # Track if current episode used recorded start
-
-
-
 
     def get_current_stage_info(self):
         """Get current world and stage from environment."""
@@ -431,8 +405,7 @@ class RecordedGameplayWrapper(gym.Wrapper):
     
     def _load_recorded_sessions(self, world, stage):
         """Load recorded sessions for a specific world/stage."""
-        # Import config values dynamically to allow runtime changes
-        from config import RECORDED_GAMEPLAY_DIR, ONE_RECORDING_PER_STAGE, MIN_CHECKPOINT_X_POS
+        from config import RECORDED_GAMEPLAY_DIR
         
         stage_key = f"world_{world}_stage_{stage}"
 
@@ -453,51 +426,15 @@ class RecordedGameplayWrapper(gym.Wrapper):
             self.recorded_sessions[stage_key] = []
             return []
 
-        # Load sessions
+        # Load the first recording found
         sessions = []
-        if ONE_RECORDING_PER_STAGE:
-            # Use only the most recent recording (latest by filename)
-            latest_file = max(action_files, key=lambda f: os.path.getmtime(f))
-            try:
-                with open(latest_file, 'r') as f:
-                    session_data = json.load(f)
-                    # Check if session has actions (main requirement)
-                    actions = session_data.get('actions', [])
-                    if actions:
-                        # Check final progress if final_info exists
-                        final_info = session_data.get('final_info', {})
-                        if final_info:  # If final_info exists, check x_pos
-                            final_x_pos = final_info.get('x_pos', 0)
-                            if final_x_pos >= MIN_CHECKPOINT_X_POS:
-                                sessions.append(session_data)
-                        else:
-                            # If no final_info, accept the session (legacy recordings)
-                            sessions.append(session_data)
-                        
-            except Exception as e:
-                pass
-        else:
-            # Load all available recordings
-            for action_file in sorted(action_files):
-                try:
-                    with open(action_file, 'r') as f:
-                        session_data = json.load(f)
-                        # Check if session has actions (main requirement)
-                        actions = session_data.get('actions', [])
-                        if not actions:
-                            continue
-                        
-                        # Check final progress if final_info exists
-                        final_info = session_data.get('final_info', {})
-                        if final_info:  # If final_info exists, check x_pos
-                            final_x_pos = final_info.get('x_pos', 0)
-                            if final_x_pos < MIN_CHECKPOINT_X_POS:
-                                continue
-                        # If no final_info, accept the session (legacy recordings)
-                        
-                        sessions.append(session_data)
-                except Exception as e:
-                    continue
+        try:
+            with open(action_files[0], 'r') as f:
+                session_data = json.load(f)
+                if session_data.get('actions'):  # Just check if actions exist
+                    sessions.append(session_data)
+        except Exception:
+            pass
 
         self.recorded_sessions[stage_key] = sessions
         return sessions
@@ -566,10 +503,13 @@ class RecordedGameplayWrapper(gym.Wrapper):
         self.used_recorded_start = False
         
         # Import config values dynamically to allow runtime changes
-        from config import USE_RECORDED_GAMEPLAY, RECORDED_START_PROBABILITY
+        from config import USE_RECORDED_GAMEPLAY, get_recorded_start_probability
+        
+        # Get current recorded start probability based on training progress
+        current_recorded_probability = get_recorded_start_probability()
         
         # Check if we should use recorded gameplay
-        if USE_RECORDED_GAMEPLAY and random.random() < RECORDED_START_PROBABILITY:
+        if USE_RECORDED_GAMEPLAY and random.random() < current_recorded_probability:
             # Get current stage info
             world, stage = self.get_current_stage_info()
             
@@ -586,7 +526,7 @@ def create_env(use_level_start=False):
     
     # Create base environment
     env = gym_super_mario_bros.make('SuperMarioBros-v0')  # Default to World 1-1
-    env = JoypadSpace(env, EXPANDED_COMPLEX_MOVEMENT)
+    env = JoypadSpace(env, USED_MOVESET)
 
     # Apply the custom random stage wrapper ONLY if RANDOM_STAGES is True
     if RANDOM_STAGES:
@@ -597,15 +537,15 @@ def create_env(use_level_start=False):
 
     # Apply all the preprocessing wrappers
     env = GrayScaleObservation(env)
-    env = ResizeObservation(env, 128)
-    env = SkipFrame(env, skip=6)
+    env = ResizeObservation(env, DOWNSCALE_RESOLUTION)
+    env = SkipFrame(env, skip=SKIPPED_FRAMES)
     
     # Apply recorded gameplay wrapper AFTER SkipFrame to match recording level
     # This ensures recorded actions are replayed at the same abstraction level they were recorded
     if USE_RECORDED_GAMEPLAY and not use_level_start:
         env = RecordedGameplayWrapper(env)
     
-    env = FrameStack(env, 8)
+    env = FrameStack(env, STACKED_FRAMES)
     
     # Apply RewardShaperEnv FIRST (it handles death penalty and movement rewards)
     env = RewardShaperEnv(env, death_penalty=DEATH_PENALTY, score_reward_factor=SCORE_REWARD_FACTOR)

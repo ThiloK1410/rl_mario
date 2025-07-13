@@ -19,7 +19,7 @@ except ImportError:
     TORCHRL_AVAILABLE = False
     print("Warning: TorchRL not available, falling back to standard replay buffer")
 
-from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU, PER_ALPHA, PER_BETA, PER_BETA_INCREMENT, USE_DUELING_NETWORK
+from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU, PER_ALPHA, PER_BETA, PER_BETA_INCREMENT, USE_DUELING_NETWORK, STACKED_FRAMES, DOWNSCALE_RESOLUTION, EPSILON_FINE_TUNE_THRESHOLD, EPSILON_FINE_TUNE_DECAY, EPSILON_FINE_TUNE_MIN
 
 # Global device variable
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,11 +27,19 @@ print(f"Using device: {DEVICE}")
 
 
 class DQN(nn.Module):
-    def __init__(self, input_shape, n_actions, input_channels=8):
+    def __init__(self, n_actions):
         super(DQN, self).__init__()
+        
+        # Use config parameters directly
+        input_channels = STACKED_FRAMES
+        input_height = DOWNSCALE_RESOLUTION
+        input_width = DOWNSCALE_RESOLUTION
+        
+        self.input_shape = (input_height, input_width)
+        self.input_channels = input_channels
 
         self.conv = nn.Sequential(
-            # The input is a stack of 4 grayscale 84x84 frames
+            # The input is a stack of frames with configurable resolution
             nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
@@ -40,7 +48,7 @@ class DQN(nn.Module):
             nn.ReLU()
         )
 
-        conv_out_size = self._get_conv_out(input_shape, input_channels)
+        conv_out_size = self._get_conv_out(self.input_shape, input_channels)
 
         self.fc = nn.Sequential(
             nn.Linear(conv_out_size, 512),
@@ -69,11 +77,19 @@ class DQN(nn.Module):
 
 
 class DuelingDQN(nn.Module):
-    def __init__(self, input_shape, n_actions, input_channels=8):
+    def __init__(self, n_actions):
         super(DuelingDQN, self).__init__()
+        
+        # Use config parameters directly
+        input_channels = STACKED_FRAMES
+        input_height = DOWNSCALE_RESOLUTION
+        input_width = DOWNSCALE_RESOLUTION
+        
+        self.input_shape = (input_height, input_width)
+        self.input_channels = input_channels
 
         self.conv = nn.Sequential(
-            # The input is a stack of 4 grayscale 84x84 frames
+            # The input is a stack of frames with configurable resolution
             nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
@@ -82,7 +98,7 @@ class DuelingDQN(nn.Module):
             nn.ReLU()
         )
 
-        conv_out_size = self._get_conv_out(input_shape, input_channels)
+        conv_out_size = self._get_conv_out(self.input_shape, input_channels)
 
         # Value stream - outputs a single value V(s)
         self.value_stream = nn.Sequential(
@@ -247,10 +263,10 @@ class TorchRLPrioritizedReplayBuffer:
         
         # Create TensorDict with uint8 data - let TorchRL handle batching
         tensordict = TensorDict({
-            "state": torch.from_numpy(state_np).byte(),           # [8, 128, 128] uint8
+            "state": torch.from_numpy(state_np).byte(),           # [STACKED_FRAMES, DOWNSCALE_RESOLUTION, DOWNSCALE_RESOLUTION] uint8
             "action": torch.tensor(action, dtype=torch.long),      # scalar
             "reward": torch.tensor(reward, dtype=torch.float),     # scalar  
-            "next_state": torch.from_numpy(next_state_np).byte(), # [8, 128, 128] uint8
+            "next_state": torch.from_numpy(next_state_np).byte(), # [STACKED_FRAMES, DOWNSCALE_RESOLUTION, DOWNSCALE_RESOLUTION] uint8
             "done": torch.tensor(done, dtype=torch.bool),          # scalar
             "td_error": torch.tensor(1.0, dtype=torch.float)       # scalar
         }, batch_size=[], device=self.cpu_device)  # No batch dimension - let TorchRL handle it
@@ -443,29 +459,138 @@ class RankBasedPrioritizedReplayBuffer:
         return len(self.buffer)
 
 
-class MarioAgent:
-    def __init__(self, state_shape, n_actions, experience_queue, lr=0.00025, gamma=0.9, epsilon=1.0,
-                 epsilon_min=0.02, epsilon_decay=0.001, memory_size=200000, batch_size=32):
-        self.state_shape = state_shape
-        self.n_actions = n_actions
-        self.gamma = gamma
-        self.epsilon = epsilon
+class EpsilonScheduler:
+    """
+    Epsilon scheduler with two phases:
+    1. Regular phase: Normal epsilon decay from start to min
+    2. Fine-tuning phase: Activated after n flag completions from level start,
+       uses slower decay from first min to even lower min for fine-tuning
+    """
+    
+    def __init__(self, epsilon_start=1.0, epsilon_min=0.02, epsilon_decay=0.001,
+                 fine_tune_threshold=5, fine_tune_decay=0.0001, fine_tune_min=0.01):
+        # Phase 1 parameters (regular training)
+        self.epsilon_start = epsilon_start
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
+        
+        # Phase 2 parameters (fine-tuning)
+        self.fine_tune_threshold = fine_tune_threshold
+        self.fine_tune_decay = fine_tune_decay
+        self.fine_tune_min = fine_tune_min
+        
+        # Current state
+        self.current_epsilon = epsilon_start
+        self.phase = 1  # 1 = regular, 2 = fine-tuning
+        self.flag_completions = 0
+        
+        print(f"[EPSILON] Initialized scheduler:")
+        print(f"[EPSILON] Phase 1: {epsilon_start:.3f} → {epsilon_min:.3f} (decay: {epsilon_decay:.4f})")
+        print(f"[EPSILON] Phase 2: {epsilon_min:.3f} → {fine_tune_min:.3f} (decay: {fine_tune_decay:.4f})")
+        print(f"[EPSILON] Fine-tuning threshold: {fine_tune_threshold} flag completions")
+    
+    def update_flag_completions(self, flag_completions):
+        """Update the number of flag completions from level start."""
+        self.flag_completions = flag_completions
+        
+        # Check if we should transition to fine-tuning phase
+        # Only transition if we're in phase 1, have enough flags, AND have reached the first minimum
+        if (self.phase == 1 and 
+            self.flag_completions >= self.fine_tune_threshold and 
+            self.current_epsilon <= self.epsilon_min):
+            self.phase = 2
+            # Start fine-tuning phase from the first phase minimum (should already be there)
+            self.current_epsilon = self.epsilon_min
+            print(f"[EPSILON] 🎯 FINE-TUNING PHASE ACTIVATED! ({self.flag_completions} flags completed)")
+            print(f"[EPSILON] Switching to fine-tuning: {self.epsilon_min:.3f} → {self.fine_tune_min:.3f}")
+    
+    def get_epsilon(self):
+        """Get the current epsilon value."""
+        return self.current_epsilon
+    
+    def step(self):
+        """Update epsilon for one training step."""
+        if self.phase == 1:
+            # Regular phase: decay from start to min
+            if self.current_epsilon > self.epsilon_min:
+                self.current_epsilon -= self.epsilon_decay
+                # Clamp to minimum to prevent going below
+                if self.current_epsilon < self.epsilon_min:
+                    self.current_epsilon = self.epsilon_min
+            
+            # Check if we can transition to fine-tuning phase (now that epsilon is properly clamped)
+            if (self.flag_completions >= self.fine_tune_threshold and 
+                self.current_epsilon <= self.epsilon_min):
+                self.phase = 2
+                print(f"[EPSILON] 🎯 FINE-TUNING PHASE ACTIVATED! ({self.flag_completions} flags completed)")
+                print(f"[EPSILON] Switching to fine-tuning: {self.epsilon_min:.3f} → {self.fine_tune_min:.3f}")
+        else:
+            # Fine-tuning phase: decay from first min to second min
+            if self.current_epsilon > self.fine_tune_min:
+                self.current_epsilon -= self.fine_tune_decay
+                # Clamp to minimum to prevent going below
+                if self.current_epsilon < self.fine_tune_min:
+                    self.current_epsilon = self.fine_tune_min
+    
+    def get_phase_info(self):
+        """Get information about the current phase."""
+        if self.phase == 1:
+            # Check if ready for fine-tuning but waiting for epsilon to reach minimum
+            flags_ready = self.flag_completions >= self.fine_tune_threshold
+            epsilon_ready = self.current_epsilon <= self.epsilon_min
+            
+            phase_name = 'Regular'
+            if flags_ready and not epsilon_ready:
+                phase_name = 'Regular (Ready for Fine-tuning)'
+            
+            return {
+                'phase': phase_name,
+                'epsilon': self.current_epsilon,
+                'target_min': self.epsilon_min,
+                'decay_rate': self.epsilon_decay,
+                'flags_to_fine_tune': max(0, self.fine_tune_threshold - self.flag_completions),
+                'ready_for_fine_tune': flags_ready and epsilon_ready
+            }
+        else:
+            return {
+                'phase': 'Fine-tuning',
+                'epsilon': self.current_epsilon,
+                'target_min': self.fine_tune_min,
+                'decay_rate': self.fine_tune_decay,
+                'flags_completed': self.flag_completions
+            }
+
+
+class MarioAgent:
+    def __init__(self, n_actions, lr=0.00025, gamma=0.9, epsilon=1.0,
+                 epsilon_min=0.02, epsilon_decay=0.001, memory_size=200000, batch_size=32):
+        self.n_actions = n_actions
+        self.gamma = gamma
         self.batch_size = batch_size
+        
+        # Initialize epsilon scheduler with config parameters
+        self.epsilon_scheduler = EpsilonScheduler(
+            epsilon_start=epsilon,
+            epsilon_min=epsilon_min,
+            epsilon_decay=epsilon_decay,
+            fine_tune_threshold=EPSILON_FINE_TUNE_THRESHOLD,
+            fine_tune_decay=EPSILON_FINE_TUNE_DECAY,
+            fine_tune_min=EPSILON_FINE_TUNE_MIN
+        )
 
         # tau describes the percentage the target network gets nudged to the q-network each step
         self.tau = AGENT_TAU
 
         # Neural networks - choose between DQN and DuelingDQN based on config
+        # Networks will automatically use STACKED_FRAMES and DOWNSCALE_RESOLUTION from config
         if USE_DUELING_NETWORK:
-            print("Using Dueling Network architecture")
-            self.q_network = DuelingDQN(state_shape, n_actions).to(DEVICE)
-            self.target_network = DuelingDQN(state_shape, n_actions).to(DEVICE)
+            print(f"Using Dueling Network architecture ({STACKED_FRAMES} channels, {DOWNSCALE_RESOLUTION}x{DOWNSCALE_RESOLUTION} resolution)")
+            self.q_network = DuelingDQN(n_actions).to(DEVICE)
+            self.target_network = DuelingDQN(n_actions).to(DEVICE)
         else:
-            print("Using standard DQN architecture")
-            self.q_network = DQN(state_shape, n_actions).to(DEVICE)
-            self.target_network = DQN(state_shape, n_actions).to(DEVICE)
+            print(f"Using standard DQN architecture ({STACKED_FRAMES} channels, {DOWNSCALE_RESOLUTION}x{DOWNSCALE_RESOLUTION} resolution)")
+            self.q_network = DQN(n_actions).to(DEVICE)
+            self.target_network = DQN(n_actions).to(DEVICE)
         
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
 
@@ -475,22 +600,22 @@ class MarioAgent:
         if TORCHRL_AVAILABLE:
             print("Using TorchRL PrioritizedReplayBuffer (Memory-Efficient uint8 storage)")
             self.memory = TorchRLPrioritizedReplayBuffer(memory_size)
-            # Calculate memory savings
-            uint8_gb = memory_size * (8 * 128 * 128 * 2) / (1024**3)  # 2 states per experience
+            # Calculate memory savings using config parameters
+            uint8_gb = memory_size * (STACKED_FRAMES * DOWNSCALE_RESOLUTION * DOWNSCALE_RESOLUTION * 2) / (1024**3)  # 2 states per experience
             float32_gb = uint8_gb * 4  # float32 is 4x larger than uint8
             print(f"[MEMORY] Buffer will use ~{uint8_gb:.1f}GB instead of {float32_gb:.1f}GB")
             print(f"[MEMORY] Saving {float32_gb - uint8_gb:.1f}GB (~{((float32_gb - uint8_gb) / float32_gb * 100):.0f}% reduction)")
         else:
             print("Using StandardReplayBuffer (Memory-Efficient uint8 storage)")
             self.memory = StandardReplayBuffer(memory_size)
-            # Calculate memory savings
-            uint8_gb = memory_size * (8 * 128 * 128 * 2) / (1024**3)  # 2 states per experience
+            # Calculate memory savings using config parameters
+            uint8_gb = memory_size * (STACKED_FRAMES * DOWNSCALE_RESOLUTION * DOWNSCALE_RESOLUTION * 2) / (1024**3)  # 2 states per experience
             float32_gb = uint8_gb * 4  # float32 is 4x larger than uint8
             print(f"[MEMORY] Buffer will use ~{uint8_gb:.1f}GB instead of {float32_gb:.1f}GB")
             print(f"[MEMORY] Saving {float32_gb - uint8_gb:.1f}GB (~{((float32_gb - uint8_gb) / float32_gb * 100):.0f}% reduction)")
 
     def act(self, state, epsilon_override=None):
-        epsilon = self.epsilon
+        epsilon = self.epsilon_scheduler.get_epsilon()
         if epsilon_override is not None:
             epsilon = epsilon_override
         if np.random.random() <= epsilon:
@@ -502,6 +627,19 @@ class MarioAgent:
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.push(state, action, reward, next_state, done)
+    
+    def update_flag_completions(self, flag_completions):
+        """Update the epsilon scheduler with the current number of flag completions."""
+        self.epsilon_scheduler.update_flag_completions(flag_completions)
+    
+    @property
+    def epsilon(self):
+        """Get current epsilon value for compatibility."""
+        return self.epsilon_scheduler.get_epsilon()
+    
+    def get_epsilon_info(self):
+        """Get detailed information about epsilon scheduler state."""
+        return self.epsilon_scheduler.get_phase_info()
 
     def replay(self, batch_size=32, episodes=1):
         # If we don't have enough collected memories for a single batch, we skip training
@@ -610,11 +748,8 @@ class MarioAgent:
                     self.tau * q_param.data + (1.0 - self.tau) * target_param.data
                 )
 
-        # Update epsilon after all batches have been processed
-        if self.epsilon > self.epsilon_min:
-            self.epsilon -= self.epsilon_decay
-        else:
-            self.epsilon = self.epsilon_min
+        # Update epsilon using the scheduler
+        self.epsilon_scheduler.step()
 
         avg_reward = total_reward / episodes
 

@@ -8,13 +8,12 @@ Now includes comprehensive gameplay recording for random start location generati
 
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
-from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 import pygame
 import time
 import os
 import json
 from datetime import datetime
-from config import ONE_RECORDING_PER_STAGE
+from config import ONE_RECORDING_PER_STAGE, EXPANDED_COMPLEX_MOVEMENT
 
 def create_human_env(world=1, stage=1):
     """Create a Mario environment optimized for human play."""
@@ -26,7 +25,7 @@ def create_human_env(world=1, stage=1):
         print(f"Warning: Level {world}-{stage} not found, defaulting to 1-1")
         env = gym_super_mario_bros.make('SuperMarioBros-1-1-v0')
     
-    env = JoypadSpace(env, COMPLEX_MOVEMENT)
+    env = JoypadSpace(env, EXPANDED_COMPLEX_MOVEMENT)
     
     # Add SkipFrame wrapper to match training environment
     # This ensures recorded actions will work correctly when replayed
@@ -505,7 +504,7 @@ def main():
                     
                     # Check for level completion (improved flag detection)
                     x_pos = info.get('x_pos', 0)
-                    flag_reached = (x_pos >= 3160 or info.get('flag_get', False))
+                    flag_reached = info.get('flag_get', False)
                     
                     if flag_reached:
                         print(f"\n🎉 LEVEL COMPLETED! 🎉")

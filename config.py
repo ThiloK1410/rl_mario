@@ -1,4 +1,32 @@
 # Configuration constants for Mario RL training
+from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+
+# Movesets from gym_super_mario_bros.actions can be imported:
+# from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
+
+# Define expanded action space to match recording environment
+# This matches the 19-action space used in play_mario.py
+EXPANDED_COMPLEX_MOVEMENT = [
+    ['NOOP'],           # 0
+    ['right'],          # 1
+    ['right', 'A'],     # 2
+    ['right', 'B'],     # 3
+    ['right', 'A', 'B'], # 4
+    ['A'],              # 5
+    ['left'],           # 6
+    ['left', 'A'],      # 7
+    ['left', 'B'],      # 8
+    ['left', 'A', 'B'], # 9
+    ['down'],           # 10
+    ['up'],             # 11
+    ['A', 'B'],         # 12 - NEW
+    ['down', 'A'],      # 13 - NEW
+    ['down', 'B'],      # 14 - NEW
+    ['down', 'A', 'B'], # 15 - NEW
+    ['up', 'A'],        # 16 - NEW
+    ['up', 'B'],        # 17 - NEW
+    ['up', 'A', 'B'],   # 18 - NEW
+]
 
 # folder where agent gets saved to and loaded from
 AGENT_FOLDER = "checkpoints"
@@ -9,6 +37,17 @@ RANDOM_STAGES = False
 # Interval at which the model will be saved
 SAVE_INTERVAL = 100
 
+# ----------------------------------------------------------------------------------------------------------------------
+# PREPROCESSING
+# ----------------------------------------------------------------------------------------------------------------------
+
+STACKED_FRAMES = 8
+
+DOWNSCALE_RESOLUTION = 64
+
+SKIPPED_FRAMES = 8
+
+USED_MOVESET = SIMPLE_MOVEMENT
 
 # ----------------------------------------------------------------------------------------------------------------------
 # SAMPLE CONTROL
@@ -19,11 +58,11 @@ SAVE_INTERVAL = 100
 BUFFER_SIZE = 200000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 2048
+BATCH_SIZE = 64
 
 # Minimum number of experiences to collect before starting training
 # Must be >= BATCH_SIZE to ensure we can sample batches
-MIN_BUFFER_SIZE = 30000
+MIN_BUFFER_SIZE = 20000
 
 # Validate that MIN_BUFFER_SIZE is at least BATCH_SIZE
 if MIN_BUFFER_SIZE < BATCH_SIZE:
@@ -31,17 +70,13 @@ if MIN_BUFFER_SIZE < BATCH_SIZE:
 
 # controls how much experiences needs to be collected before we can start the next epoch
 # exp_collected = (BATCH_SIZE * EPISODES_PER_EPOCH) / REUSE_FACTOR
-REUSE_FACTOR = 8.0
+REUSE_FACTOR = 5.0
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 4
+EPISODES_PER_EPOCH = 8
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000
-
-# Number of threads to use for parallel experience collection
-NUM_COLLECTION_THREADS = 8
-
 
 # ----------------------------------------------------------------------------------------------------------------------
 # LEARNING PARAMETERS
@@ -51,7 +86,7 @@ NUM_COLLECTION_THREADS = 8
 MAX_STEPS_PER_RUN = 0
 
 # starting learning rate for the neural network
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
 
 # Learning rate decay factor
 LR_DECAY_FACTOR = 0.9
@@ -60,13 +95,21 @@ LR_DECAY_FACTOR = 0.9
 LR_DECAY_RATE = 200
 
 # Initial epsilon value for epsilon-greedy exploration
-EPSILON_START = 1
+EPSILON_START = 0.9
 
 # How much epsilon decays each training epoch, high epsilon means high chance to randomly explore the environment
-EPSILON_DECAY = 0.001
+EPSILON_DECAY = 0.0005
 
 # Minimum epsilon value
-EPSILON_MIN = 0.1
+EPSILON_MIN = 0.2
+
+# Performance-based epsilon scheduler configuration
+# Number of flag completions from level start required to enter fine-tuning phase
+EPSILON_FINE_TUNE_THRESHOLD = 5
+
+# Second phase epsilon parameters (fine-tuning phase)
+EPSILON_FINE_TUNE_DECAY = 0.0001  # Slower decay for fine-tuning
+EPSILON_FINE_TUNE_MIN = 0.01      # Lower minimum for fine-tuning
 
 # Gamma describes how much the agent should look for future rewards vs immediate ones.
 # gamma = 1 future rewards are as valuable as immediate ones
@@ -98,12 +141,12 @@ DEATH_PENALTY = 1.0
 COMPLETION_REWARD = 2.0
 
 # factors the amount mario gets rewarded for gaining item effects
-ITEM_REWARD_FACTOR = 2.0
+ITEM_REWARD_FACTOR = 0.0
 
 # how much gaining score should be factored in the reward function,
 # score is very high so keep this factor low (ca. 0.01)
 # Enabled to provide intermediate feedback for collecting coins, defeating enemies, etc.
-SCORE_REWARD_FACTOR = 0.01
+SCORE_REWARD_FACTOR = 0.00
 
 # tau describes the percentage of how much the target networks aligns with the dqn each step
 AGENT_TAU = 0.005
@@ -120,7 +163,7 @@ USE_DUELING_NETWORK = True
 # alpha = 0: uniform random sampling (no prioritization)
 # alpha = 1: full prioritization based on TD error
 # Typical values: 0.6-0.7 for good balance between exploration and exploitation
-PER_ALPHA = 0.7
+PER_ALPHA = 0.8
 
 # PER beta parameter - controls importance sampling correction
 # beta = 0: no correction for bias introduced by prioritization
@@ -139,14 +182,53 @@ PER_BETA_INCREMENT = 0.001
 # ----------------------------------------------------------------------------------------------------------------------
 
 # Enable using recorded gameplay for random start locations
-USE_RECORDED_GAMEPLAY = True
+USE_RECORDED_GAMEPLAY = False
 
 # Directory where recorded gameplay sessions are stored
 RECORDED_GAMEPLAY_DIR = "recorded_gameplay"
 
-# Probability of using a recorded start position when available (0.0 to 1.0)
-# 1.0 = always use recorded start if available, 0.0 = never use recorded starts
-RECORDED_START_PROBABILITY = 0.7
+# Global variable to track current training epoch (used by environment for curriculum learning)
+CURRENT_TRAINING_EPOCH = 0
+
+# Curriculum learning parameters for recorded start probability
+# The probability starts at RECORDED_START_PROBABILITY_MIN and increases linearly
+# to RECORDED_START_PROBABILITY_MAX over RECORDED_START_PROBABILITY_INCREASE_EPOCHS epochs
+
+# Minimum probability of using recorded start positions (early training)
+RECORDED_START_PROBABILITY_MIN = 0.1  # 20% chance at start of training
+
+# Maximum probability of using recorded start positions (late training)
+RECORDED_START_PROBABILITY_MAX = 0.6  # 80% chance at end of curriculum
+
+# Number of epochs over which to increase the probability linearly
+RECORDED_START_PROBABILITY_INCREASE_EPOCHS = 500  # Increase over 1000 epochs
+
+# Function to calculate current recorded start probability based on epoch
+def get_recorded_start_probability(current_epoch=None):
+    """
+    Calculate the current recorded start probability based on training progress.
+    
+    Args:
+        current_epoch: Current training epoch (uses global CURRENT_TRAINING_EPOCH if None)
+        
+    Returns:
+        float: Current probability (0.0 to 1.0) of using recorded start positions
+    """
+    if current_epoch is None:
+        current_epoch = CURRENT_TRAINING_EPOCH
+    
+    if current_epoch >= RECORDED_START_PROBABILITY_INCREASE_EPOCHS:
+        return RECORDED_START_PROBABILITY_MAX
+    
+    # Linear interpolation between min and max
+    progress = current_epoch / RECORDED_START_PROBABILITY_INCREASE_EPOCHS
+    return RECORDED_START_PROBABILITY_MIN + (RECORDED_START_PROBABILITY_MAX - RECORDED_START_PROBABILITY_MIN) * progress
+
+# Function to update the global epoch counter (called by training loop)
+def update_training_epoch(epoch):
+    """Update the global training epoch counter."""
+    global CURRENT_TRAINING_EPOCH
+    CURRENT_TRAINING_EPOCH = epoch
 
 # Whether to prefer checkpoints that are further in the level
 # True = weight checkpoints by x_pos, False = equal probability for all checkpoints
@@ -160,7 +242,11 @@ ONE_RECORDING_PER_STAGE = True
 
 # Sampling range for recorded gameplay (to avoid getting stuck in late stages)
 MIN_SAMPLING_PERCENTAGE = 0.20  # Start sampling from 30% through the action sequence
-MAX_SAMPLING_PERCENTAGE = 0.80  # End sampling at 85% through the action sequence
+MAX_SAMPLING_PERCENTAGE = 0.750  # End sampling at 85% through the action sequence
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+
 
 
 
