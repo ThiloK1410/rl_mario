@@ -10,7 +10,7 @@ from collections import deque
 import threading
 
 from dqn_agent import MarioAgent, DEVICE
-from environment import create_env
+from environment import create_env, create_env_new
 from tensorboard_logger import TensorBoardLogger, create_experiment_config
 from config import (
     BUFFER_SIZE, GAMMA, EPSILON_DECAY, EPSILON_MIN, LEARNING_RATE, 
@@ -250,7 +250,7 @@ def initialize_agent(tb_logger, loaded_experiment_name, latest_checkpoint, use_p
 def initialize_environment_and_agent(tb_logger, loaded_experiment_name, latest_checkpoint, use_prioritized_replay=True):
     """Initialize the environment and agent, and load checkpoint if available."""
     # Create single environment
-    env = create_env()
+    env = create_env_new()
     print(f"[ENV] Created environment (random_stages={RANDOM_STAGES})")
     
     # Initialize agent

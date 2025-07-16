@@ -1,5 +1,5 @@
 # Configuration constants for Mario RL training
-from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
 
 # Movesets from gym_super_mario_bros.actions can be imported:
 # from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
@@ -41,13 +41,16 @@ SAVE_INTERVAL = 100
 # PREPROCESSING
 # ----------------------------------------------------------------------------------------------------------------------
 
-STACKED_FRAMES = 8
+STACKED_FRAMES = 4
 
-DOWNSCALE_RESOLUTION = 64
+DOWNSCALE_RESOLUTION = 124
 
-SKIPPED_FRAMES = 8
+SKIPPED_FRAMES = 4
 
-USED_MOVESET = SIMPLE_MOVEMENT
+# sparsity for frame stacking, only used in create_env_new()
+SPARSE_FRAME_INTERVAL = 4
+
+USED_MOVESET = COMPLEX_MOVEMENT
 
 # ----------------------------------------------------------------------------------------------------------------------
 # SAMPLE CONTROL
@@ -55,14 +58,14 @@ USED_MOVESET = SIMPLE_MOVEMENT
 
 # The size of the replay buffer, where the agent stores its memories,
 # bigger memory -> old replays stay longer in memory -> more stable gradient updates
-BUFFER_SIZE = 200000
+BUFFER_SIZE = 100000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 
 # Minimum number of experiences to collect before starting training
 # Must be >= BATCH_SIZE to ensure we can sample batches
-MIN_BUFFER_SIZE = 20000
+MIN_BUFFER_SIZE = 10000
 
 # Validate that MIN_BUFFER_SIZE is at least BATCH_SIZE
 if MIN_BUFFER_SIZE < BATCH_SIZE:
@@ -70,7 +73,7 @@ if MIN_BUFFER_SIZE < BATCH_SIZE:
 
 # controls how much experiences needs to be collected before we can start the next epoch
 # exp_collected = (BATCH_SIZE * EPISODES_PER_EPOCH) / REUSE_FACTOR
-REUSE_FACTOR = 5.0
+REUSE_FACTOR = 10.0
 
 # The amount of batches we train per epoch
 EPISODES_PER_EPOCH = 8
@@ -86,13 +89,13 @@ NUM_EPOCHS = 20000
 MAX_STEPS_PER_RUN = 0
 
 # starting learning rate for the neural network
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
 
 # Learning rate decay factor
 LR_DECAY_FACTOR = 0.9
 
 # Learning rate decay rate
-LR_DECAY_RATE = 200
+LR_DECAY_RATE = 100
 
 # Initial epsilon value for epsilon-greedy exploration
 EPSILON_START = 0.9
@@ -125,7 +128,7 @@ GAMMA = 0.95
 DEADLOCK_STEPS = 20
 
 # how much the reward for moving should be factored in, moving backwards is half that
-MOVE_REWARD = 1.0 / 12.0
+MOVE_REWARD = 1.0 / 24.0
 
 # cap for move rewards to prevent them from overwhelming other reward signals
 # movement rewards will be clamped between -MOVE_REWARD_CAP and +MOVE_REWARD_CAP
@@ -149,7 +152,7 @@ ITEM_REWARD_FACTOR = 0.0
 SCORE_REWARD_FACTOR = 0.00
 
 # tau describes the percentage of how much the target networks aligns with the dqn each step
-AGENT_TAU = 0.005
+AGENT_TAU = 0.05
 
 # Whether to use Dueling Network architecture instead of standard DQN
 # Dueling Network separates value and advantage estimation for better performance

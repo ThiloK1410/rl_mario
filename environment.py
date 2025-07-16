@@ -1,5 +1,8 @@
+from typing import Tuple
+
 import gym
 from gym import spaces
+from gym.core import ActType, ObsType
 from gym.wrappers.frame_stack import FrameStack
 import cv2
 import numpy as np
@@ -11,6 +14,7 @@ import os
 import pickle
 import glob
 import json
+from collections import deque
 
 
 
@@ -20,7 +24,7 @@ from config import (
     USE_RECORDED_GAMEPLAY, RECORDED_GAMEPLAY_DIR, get_recorded_start_probability,
     PREFER_ADVANCED_CHECKPOINTS, MIN_CHECKPOINT_X_POS, ONE_RECORDING_PER_STAGE, MOVE_REWARD,
     MIN_SAMPLING_PERCENTAGE, MAX_SAMPLING_PERCENTAGE, MOVE_REWARD_CAP, DOWNSCALE_RESOLUTION, SKIPPED_FRAMES,
-    STACKED_FRAMES, USED_MOVESET, EXPANDED_COMPLEX_MOVEMENT
+    STACKED_FRAMES, USED_MOVESET, EXPANDED_COMPLEX_MOVEMENT, SPARSE_FRAME_INTERVAL
 )
 
 
@@ -66,14 +70,9 @@ class SkipFrame(gym.Wrapper):
         # sum up all rewards in skipped frames and keep doing the same action on skipped frames
         total_reward = 0.0
         done = False
-        first_x_pos = None
-        last_x_pos = None
         
         for i in range(self._skip):
             obs, reward, done, info = self.env.step(action)
-            if i == 0:
-                first_x_pos = info.get('x_pos', 0)
-            last_x_pos = info.get('x_pos', 0)
             total_reward += reward
             if done:
                 break
@@ -156,15 +155,49 @@ class LifeLimitEnv(gym.Wrapper):
     def __init__(self, env, death_penalty):
         super().__init__(env)
         self.death_penalty = death_penalty
+        self.last_lives = None
+        self.previous_state = None
+        self.previous_info = None
 
-    def step(self, action):
+    def reset(self, **kwargs):
+        self.last_lives = None
+        self.previous_state = None
+        self.previous_info = None
+        return self.env.reset(**kwargs)
+
+    def step(self, action: ActType) -> Tuple[ObsType, float, bool, dict]:
+        # Take the step in the base environment
         state, reward, done, info = self.env.step(action)
-
-        if info['life'] < 2:
+        
+        current_life = info['life']
+        
+        # Initialize on first step
+        if self.last_lives is None:
+            self.last_lives = current_life
+            self.previous_state = state
+            self.previous_info = info
+            return state, reward, done, info
+        
+        # Check if Mario died (life decreased)
+        if current_life < self.last_lives:
+            # Mario died! Return the previous state (before death)
             done = True
-            reward -= self.death_penalty
-
+            
+            # Add death information to the info dict for RewardShaperEnv
+            death_info = self.previous_info.copy()
+            death_info['mario_died'] = True
+            death_info['death_penalty'] = self.death_penalty
+            
+            # Return the state from before death occurred
+            return self.previous_state, reward, done, death_info
+        
+        # Normal step - update tracking and return current state
+        self.last_lives = current_life
+        self.previous_state = state
+        self.previous_info = info
+        
         return state, reward, done, info
+
 
 # limits mario to play a single level and gives a reward for completion
 class LevelLimitEnv(gym.Wrapper):
@@ -221,9 +254,11 @@ class RewardShaperEnv(gym.Wrapper):
         self.last_score = current_score
         reward += score_reward
 
-        # Check if Mario died (life decreased)
+        # Check if Mario died - either from life decrease or info flag
         current_life = info.get('life', 2)
-        if current_life < self.last_life:
+        mario_died = info.get('mario_died', False)
+        
+        if current_life < self.last_life or mario_died:
             # Mario died - apply death penalty and skip movement calculation
             reward -= self.death_penalty
         else:
@@ -251,8 +286,9 @@ class RewardShaperEnv(gym.Wrapper):
                 # Update position tracking
                 self.last_x_pos = current_x_pos
         
-        # Update life tracking
-        self.last_life = current_life
+        # Update life tracking (but only if we don't have death flag from previous wrapper)
+        if not mario_died:
+            self.last_life = current_life
 
         return state, reward, done, info
 
@@ -520,6 +556,113 @@ class RecordedGameplayWrapper(gym.Wrapper):
         return obs
 
 
+class SparseFrameStack(gym.Wrapper):
+    """
+    Sparse frame stacking wrapper that spreads out temporal information
+    by stacking every n-th frame instead of consecutive frames.
+    
+    This maintains the same number of stacked frames but spreads them
+    across a wider temporal window without increasing frame skip.
+    """
+    
+    def __init__(self, env, num_stack=4, sparse_interval=2):
+        """
+        Initialize sparse frame stacking wrapper.
+        
+        Args:
+            env: The environment to wrap
+            num_stack: Number of frames to stack (same as regular frame stacking)
+            sparse_interval: Interval between stacked frames (every n-th frame)
+        """
+        super().__init__(env)
+        self.num_stack = num_stack
+        self.sparse_interval = sparse_interval
+        
+        # Calculate buffer size needed to hold enough frames for sparse stacking
+        # We need at least (num_stack - 1) * sparse_interval + 1 frames
+        self.buffer_size = (num_stack - 1) * sparse_interval + 1
+        
+        # Initialize frame buffer as a deque for efficient operations
+        self.frame_buffer = deque(maxlen=self.buffer_size)
+        
+        # Get the shape of individual frames from the environment
+        obs_shape = env.observation_space.shape
+        
+        # Create new observation space with stacked frames in (C, H, W) format
+        # If the original observation has channels, multiply by num_stack
+        if len(obs_shape) == 3:  # (height, width, channels)
+            new_shape = (obs_shape[2] * num_stack, obs_shape[0], obs_shape[1])
+        else:  # (height, width) - grayscale
+            new_shape = (num_stack, obs_shape[0], obs_shape[1])
+        
+        self.observation_space = spaces.Box(
+            low=0,
+            high=255,
+            shape=new_shape,
+            dtype=np.uint8
+        )
+        
+    def reset(self, **kwargs):
+        """Reset the environment and initialize the frame buffer."""
+        obs = self.env.reset(**kwargs)
+        
+        # Clear the buffer
+        self.frame_buffer.clear()
+        
+        # Fill the buffer with the initial frame
+        for _ in range(self.buffer_size):
+            self.frame_buffer.append(obs)
+        
+        # Return the stacked observation
+        return self._get_stacked_observation()
+    
+    def step(self, action):
+        """Step the environment and update the frame buffer."""
+        obs, reward, done, info = self.env.step(action)
+        
+        # Add new frame to buffer (automatically removes oldest if full)
+        self.frame_buffer.append(obs)
+        
+        # Get stacked observation
+        stacked_obs = self._get_stacked_observation()
+        
+        return stacked_obs, reward, done, info
+    
+    def _get_stacked_observation(self):
+        """
+        Create stacked observation by selecting every sparse_interval-th frame
+        from the buffer, working backwards from the most recent frame.
+        """
+        if len(self.frame_buffer) < self.buffer_size:
+            # Not enough frames yet, duplicate the available frames
+            available_frames = list(self.frame_buffer)
+            while len(available_frames) < self.num_stack:
+                available_frames.insert(0, available_frames[0])
+            selected_frames = available_frames[-self.num_stack:]
+        else:
+            # Select frames at sparse intervals, working backwards from most recent
+            selected_frames = []
+            for i in range(self.num_stack):
+                # Calculate index: start from most recent and go back by sparse_interval
+                frame_index = -(1 + i * self.sparse_interval)
+                selected_frames.insert(0, self.frame_buffer[frame_index])
+        
+        # Stack the selected frames
+        return self._stack_frames(selected_frames)
+    
+    def _stack_frames(self, frames):
+        """Stack multiple frames into a single observation."""
+        if len(frames[0].shape) == 3:  # (height, width, channels)
+            # Stack along the channel dimension
+            stacked = np.concatenate(frames, axis=2)
+        else:  # (height, width) - grayscale
+            # Stack along a new channel dimension
+            stacked = np.stack(frames, axis=2)
+        
+        # Convert from (H, W, C) to (C, H, W) format to match DQN network expectations
+        return np.transpose(stacked, (2, 0, 1))
+
+
 def create_env(use_level_start=False):
     # Import config values dynamically to allow runtime changes
     from config import RANDOM_STAGES, USE_RECORDED_GAMEPLAY, DEADLOCK_STEPS, DEATH_PENALTY, SCORE_REWARD_FACTOR, COMPLETION_REWARD, ITEM_REWARD_FACTOR, DEADLOCK_PENALTY
@@ -567,5 +710,19 @@ def create_env(use_level_start=False):
         return False  # Default to False if no RecordedGameplayWrapper found
     
     env.get_used_recorded_start = get_used_recorded_start
+
+    return env
+
+def create_env_new():
+    env = gym_super_mario_bros.make('SuperMarioBros-v1')
+    env = JoypadSpace(env, USED_MOVESET)
+    env = GrayScaleObservation(env)
+    env = ResizeObservation(env, DOWNSCALE_RESOLUTION)
+    env = DeadlockEnv(env, deadlock_penalty=DEADLOCK_PENALTY, threshold=DEADLOCK_STEPS)
+
+    env = SkipFrame(env, skip=8)
+    
+    env = SparseFrameStack(env, num_stack=STACKED_FRAMES, sparse_interval=SPARSE_FRAME_INTERVAL)
+       
 
     return env

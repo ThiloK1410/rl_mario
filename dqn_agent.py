@@ -667,6 +667,8 @@ class MarioAgent:
                 next_states = batch["next_state"]  # type: ignore
                 dones = batch["done"]  # type: ignore
                 
+
+                
                 # Get indices and weights for priority updates
                 indices = batch.get("index", None)  # type: ignore
                 weights = batch.get("_weight", None)  # type: ignore
