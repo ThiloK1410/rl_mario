@@ -41,7 +41,7 @@ SAVE_INTERVAL = 100
 # PREPROCESSING
 # ----------------------------------------------------------------------------------------------------------------------
 
-STACKED_FRAMES = 4
+STACKED_FRAMES = 3
 
 DOWNSCALE_RESOLUTION = 124
 

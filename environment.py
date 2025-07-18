@@ -60,6 +60,7 @@ class ResizeObservation(gym.ObservationWrapper):
         return observation
 
 
+
 # wrapper to reduce frame amount
 class SkipFrame(gym.Wrapper):
     def __init__(self, env, skip):
@@ -102,6 +103,7 @@ class ScoreRewardWrapper(gym.Wrapper):
         reward += score_reward
         
         return state, reward, done, info
+
 
 class DeadlockEnv(gym.Wrapper):
     def __init__(self, env, threshold, deadlock_penalty):
@@ -149,6 +151,7 @@ class DeadlockEnv(gym.Wrapper):
                 reward -= self.deadlock_penalty
 
         return state, reward, done, info
+
 
 # limits marios lives to a single one
 class LifeLimitEnv(gym.Wrapper):
@@ -555,25 +558,9 @@ class RecordedGameplayWrapper(gym.Wrapper):
         
         return obs
 
-
+# by thilo
 class SparseFrameStack(gym.Wrapper):
-    """
-    Sparse frame stacking wrapper that spreads out temporal information
-    by stacking every n-th frame instead of consecutive frames.
-    
-    This maintains the same number of stacked frames but spreads them
-    across a wider temporal window without increasing frame skip.
-    """
-    
     def __init__(self, env, num_stack=4, sparse_interval=2):
-        """
-        Initialize sparse frame stacking wrapper.
-        
-        Args:
-            env: The environment to wrap
-            num_stack: Number of frames to stack (same as regular frame stacking)
-            sparse_interval: Interval between stacked frames (every n-th frame)
-        """
         super().__init__(env)
         self.num_stack = num_stack
         self.sparse_interval = sparse_interval
@@ -603,7 +590,6 @@ class SparseFrameStack(gym.Wrapper):
         )
         
     def reset(self, **kwargs):
-        """Reset the environment and initialize the frame buffer."""
         obs = self.env.reset(**kwargs)
         
         # Clear the buffer
@@ -617,7 +603,6 @@ class SparseFrameStack(gym.Wrapper):
         return self._get_stacked_observation()
     
     def step(self, action):
-        """Step the environment and update the frame buffer."""
         obs, reward, done, info = self.env.step(action)
         
         # Add new frame to buffer (automatically removes oldest if full)
@@ -629,10 +614,6 @@ class SparseFrameStack(gym.Wrapper):
         return stacked_obs, reward, done, info
     
     def _get_stacked_observation(self):
-        """
-        Create stacked observation by selecting every sparse_interval-th frame
-        from the buffer, working backwards from the most recent frame.
-        """
         if len(self.frame_buffer) < self.buffer_size:
             # Not enough frames yet, duplicate the available frames
             available_frames = list(self.frame_buffer)
@@ -643,7 +624,6 @@ class SparseFrameStack(gym.Wrapper):
             # Select frames at sparse intervals, working backwards from most recent
             selected_frames = []
             for i in range(self.num_stack):
-                # Calculate index: start from most recent and go back by sparse_interval
                 frame_index = -(1 + i * self.sparse_interval)
                 selected_frames.insert(0, self.frame_buffer[frame_index])
         
@@ -651,15 +631,14 @@ class SparseFrameStack(gym.Wrapper):
         return self._stack_frames(selected_frames)
     
     def _stack_frames(self, frames):
-        """Stack multiple frames into a single observation."""
-        if len(frames[0].shape) == 3:  # (height, width, channels)
+        if len(frames[0].shape) == 3:  # (channels, height, width)
             # Stack along the channel dimension
             stacked = np.concatenate(frames, axis=2)
         else:  # (height, width) - grayscale
             # Stack along a new channel dimension
             stacked = np.stack(frames, axis=2)
         
-        # Convert from (H, W, C) to (C, H, W) format to match DQN network expectations
+        # Convert from (H, W, C) to (C, H, W) format for compatibility with DQN
         return np.transpose(stacked, (2, 0, 1))
 
 

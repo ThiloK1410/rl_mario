@@ -75,7 +75,7 @@ class DQN(nn.Module):
         # Pass through the fully-connected layers to get Q-values
         return self.fc(conv_out)
 
-
+# by thilo
 class DuelingDQN(nn.Module):
     def __init__(self, n_actions):
         super(DuelingDQN, self).__init__()
@@ -204,7 +204,7 @@ class StandardReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-
+# by thilo
 class TorchRLPrioritizedReplayBuffer:
     """
     Memory-efficient TorchRL-based PrioritizedReplayBuffer that stores uint8 data on CPU
@@ -360,7 +360,7 @@ class TorchRLPrioritizedReplayBuffer:
     def __len__(self):
         return self._current_size
 
-
+# by thilo (deprecated)
 class RankBasedPrioritizedReplayBuffer:
     def __init__(self, capacity, alpha=None, beta=None, beta_increment=None):
         self.capacity = capacity
@@ -458,7 +458,7 @@ class RankBasedPrioritizedReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-
+# by thilo
 class EpsilonScheduler:
     """
     Epsilon scheduler with two phases:

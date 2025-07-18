@@ -9,7 +9,7 @@ from config import AGENT_FOLDER
 
 import numpy as np
 
-
+# by thilo
 def main():
     env = create_env()
     agent = MarioAgent(env.action_space.n)  # type: ignore
