@@ -39,7 +39,7 @@ def main():
         total_reward = 0
         current_step = 0
         while not done:
-            action = agent.act(state)
+            action = agent.act(state, epsilon_override=0.0)
             next_state, reward, done, info = env.step(action)
             env.render()
             total_reward += reward

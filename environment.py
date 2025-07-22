@@ -692,16 +692,22 @@ def create_env(use_level_start=False):
 
     return env
 
-def create_env_new():
-    env = gym_super_mario_bros.make('SuperMarioBros-v1')
-    env = JoypadSpace(env, USED_MOVESET)
-    env = GrayScaleObservation(env)
-    env = ResizeObservation(env, DOWNSCALE_RESOLUTION)
-    env = DeadlockEnv(env, deadlock_penalty=DEADLOCK_PENALTY, threshold=DEADLOCK_STEPS)
-
-    env = SkipFrame(env, skip=8)
+def create_env_new(used_moveset=None, downscale_resolution=124, deadlock_penalty=0.5, 
+                   deadlock_steps=20, skipped_frames=8, stacked_frames=3, sparse_frame_interval=4):
+    # Import from config as fallback if not provided
+    if used_moveset is None:
+        from config import USED_MOVESET
+        used_moveset = USED_MOVESET
     
-    env = SparseFrameStack(env, num_stack=STACKED_FRAMES, sparse_interval=SPARSE_FRAME_INTERVAL)
+    env = gym_super_mario_bros.make('SuperMarioBros-v1')
+    env = JoypadSpace(env, used_moveset)
+    env = GrayScaleObservation(env)
+    env = ResizeObservation(env, downscale_resolution)
+    env = DeadlockEnv(env, deadlock_penalty=deadlock_penalty, threshold=deadlock_steps)
+
+    env = SkipFrame(env, skip=skipped_frames)
+    
+    env = SparseFrameStack(env, num_stack=stacked_frames, sparse_interval=sparse_frame_interval)
        
 
     return env

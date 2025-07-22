@@ -11,7 +11,7 @@ import threading
 
 from dqn_agent import MarioAgent, DEVICE
 from environment import create_env, create_env_new
-from tensorboard_logger import TensorBoardLogger, create_experiment_config
+from tensorboard_logger import TensorBoardLogger
 from config import (
     BUFFER_SIZE, GAMMA, EPSILON_DECAY, EPSILON_MIN, LEARNING_RATE, 
     EPSILON_START, AGENT_FOLDER, RANDOM_STAGES
@@ -300,23 +300,8 @@ def log_training_metrics(tb_logger, agent, epoch, metrics, epoch_duration, prefi
     # Log model parameters periodically
     if epoch % 50 == 0:
         tb_logger.log_model_parameters(agent.q_network, epoch)
-        print(f"[TENSORBOARD] Logged model parameters at epoch {epoch}")
     
-    # Log to console with epoch info
-    print(f"[TENSORBOARD] Epoch {epoch} metrics logged")
     
-    # Simple progress logging
-    level_vs_recorded = f"Level:{metrics['avg_level_start_distance']:.1f} vs Recorded:{metrics['avg_recorded_start_distance']:.1f}" if metrics['level_start_episodes'] > 0 and metrics['recorded_start_episodes'] > 0 else f"Best Level Start:{metrics['best_level_start_distance']:.1f}"
-    flag_info = f"Flags:{metrics['flag_completions']}/{metrics['level_start_episodes']} ({metrics['flag_completion_rate']:.1%})" if metrics['level_start_episodes'] > 0 else "Flags:0/0 (0.0%)"
-    epsilon_phase_indicator = ""
-    if epsilon_info['phase'] == 'Fine-tuning':
-        epsilon_phase_indicator = "🎯"
-    elif epsilon_info['phase'] == 'Regular (Ready for Fine-tuning)':
-        epsilon_phase_indicator = "⏳"
-    print(f"[{prefix}EPOCH {epoch}] Loss: {metrics['loss']:.4f}, TD-Error: {metrics['td_error']:.4f}, "
-          f"Avg Reward: {metrics['avg_reward']:.2f}, Avg Distance: {metrics['avg_distance']:.1f}, "
-          f"{level_vs_recorded}, {flag_info}, "
-          f"Epsilon: {agent.epsilon:.3f}{epsilon_phase_indicator}, RecordedStart: {current_recorded_probability:.3f}, Buffer: {buffer_size}")
 
 
 def cleanup_and_save(tb_logger, agent, epoch, loaded_experiment_name, hparams):

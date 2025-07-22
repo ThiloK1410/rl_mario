@@ -19,7 +19,9 @@ except ImportError:
     TORCHRL_AVAILABLE = False
     print("Warning: TorchRL not available, falling back to standard replay buffer")
 
-from config import LR_DECAY_RATE, LR_DECAY_FACTOR, AGENT_TAU, PER_ALPHA, PER_BETA, PER_BETA_INCREMENT, USE_DUELING_NETWORK, STACKED_FRAMES, DOWNSCALE_RESOLUTION, EPSILON_FINE_TUNE_THRESHOLD, EPSILON_FINE_TUNE_DECAY, EPSILON_FINE_TUNE_MIN
+# Default parameters - can be overridden by passing arguments
+DEFAULT_STACKED_FRAMES = 3
+DEFAULT_DOWNSCALE_RESOLUTION = 124
 
 # Global device variable
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,13 +29,13 @@ print(f"Using device: {DEVICE}")
 
 
 class DQN(nn.Module):
-    def __init__(self, n_actions):
+    def __init__(self, n_actions, stacked_frames=DEFAULT_STACKED_FRAMES, input_resolution=DEFAULT_DOWNSCALE_RESOLUTION):
         super(DQN, self).__init__()
         
-        # Use config parameters directly
-        input_channels = STACKED_FRAMES
-        input_height = DOWNSCALE_RESOLUTION
-        input_width = DOWNSCALE_RESOLUTION
+        # Configurable network architecture
+        input_channels = stacked_frames
+        input_height = input_resolution
+        input_width = input_resolution
         
         self.input_shape = (input_height, input_width)
         self.input_channels = input_channels
@@ -77,13 +79,13 @@ class DQN(nn.Module):
 
 # by thilo
 class DuelingDQN(nn.Module):
-    def __init__(self, n_actions):
+    def __init__(self, n_actions, stacked_frames=DEFAULT_STACKED_FRAMES, input_resolution=DEFAULT_DOWNSCALE_RESOLUTION):
         super(DuelingDQN, self).__init__()
         
-        # Use config parameters directly
-        input_channels = STACKED_FRAMES
-        input_height = DOWNSCALE_RESOLUTION
-        input_width = DOWNSCALE_RESOLUTION
+        # Configurable network architecture
+        input_channels = stacked_frames
+        input_height = input_resolution
+        input_width = input_resolution
         
         self.input_shape = (input_height, input_width)
         self.input_channels = input_channels
@@ -207,42 +209,44 @@ class StandardReplayBuffer:
 # by thilo
 class TorchRLPrioritizedReplayBuffer:
     """
-    Memory-efficient TorchRL-based PrioritizedReplayBuffer that stores uint8 data on CPU
-    and only converts to float32 when sampling for training.
-    This reduces memory usage by ~75% compared to storing float32 data.
+    OPTIMIZED Memory-efficient TorchRL-based PrioritizedReplayBuffer with O(log n) complexity.
+    Uses LazyTensorStorage and batched operations for better performance.
     """
-    def __init__(self, capacity, alpha=None, beta=None, beta_increment=None):
+    def __init__(self, capacity, alpha=0.8, beta=0.4, beta_increment=0.001):
         if not TORCHRL_AVAILABLE:
             raise ImportError("TorchRL is not available. Please install it with: pip install torchrl")
         
         self.capacity = capacity
-        self.alpha = alpha if alpha is not None else PER_ALPHA
-        self.beta = beta if beta is not None else PER_BETA
-        self.beta_increment = beta_increment if beta_increment is not None else PER_BETA_INCREMENT
+        self.alpha = alpha
+        self.beta = beta
+        self.beta_increment = beta_increment
         self.max_beta = 1.0
         self._current_size = 0
         
         # Store buffer data on CPU to save GPU memory
         self.cpu_device = torch.device('cpu')
         
-        # Use ListStorage instead of LazyTensorStorage to avoid memory allocation issues
-        self._storage = ListStorage(capacity)
+        # Use LazyTensorStorage for better performance with large buffers
+        self._storage = LazyTensorStorage(capacity, device=self.cpu_device)
         self._sampler = PrioritizedSampler(
             max_capacity=capacity,
             alpha=self.alpha,
             beta=self.beta
         )
         
+        # Create buffer once and reuse
         self._replay_buffer = TensorDictReplayBuffer(
             storage=self._storage,
             sampler=self._sampler,
-            batch_size=32,  # Default batch size
+            batch_size=1,  # We'll override batch size during sampling
             priority_key="td_error"
         )
         
+        # No pre-allocation needed - we'll batch based on actual input sizes
+        
     def push(self, state, action, reward, next_state, done):
-        """Add a new experience to the buffer - stored as uint8 on CPU for memory efficiency."""
-        # Convert LazyFrames to numpy arrays if needed
+        """Add a single experience - less efficient than push_batch for multiple experiences."""
+        # For single experiences, just add individually (fallback)
         def to_numpy(obj):
             if hasattr(obj, '__array__'):
                 return np.array(obj)
@@ -251,45 +255,82 @@ class TorchRLPrioritizedReplayBuffer:
             else:
                 return np.array(obj)
         
-        # Convert states to numpy arrays and keep as uint8 for memory efficiency
         state_np = to_numpy(state)
         next_state_np = to_numpy(next_state)
         
-        # Ensure uint8 dtype for maximum memory efficiency
         if state_np.dtype != np.uint8:
             state_np = state_np.astype(np.uint8)
         if next_state_np.dtype != np.uint8:
             next_state_np = next_state_np.astype(np.uint8)
         
-        # Create TensorDict with uint8 data - let TorchRL handle batching
+        # Create single TensorDict and add it
         tensordict = TensorDict({
-            "state": torch.from_numpy(state_np).byte(),           # [STACKED_FRAMES, DOWNSCALE_RESOLUTION, DOWNSCALE_RESOLUTION] uint8
-            "action": torch.tensor(action, dtype=torch.long),      # scalar
-            "reward": torch.tensor(reward, dtype=torch.float),     # scalar  
-            "next_state": torch.from_numpy(next_state_np).byte(), # [STACKED_FRAMES, DOWNSCALE_RESOLUTION, DOWNSCALE_RESOLUTION] uint8
-            "done": torch.tensor(done, dtype=torch.bool),          # scalar
-            "td_error": torch.tensor(1.0, dtype=torch.float)       # scalar
-        }, batch_size=[], device=self.cpu_device)  # No batch dimension - let TorchRL handle it
+            "state": torch.from_numpy(state_np).byte(),
+            "action": torch.tensor(action, dtype=torch.long),
+            "reward": torch.tensor(reward, dtype=torch.float),
+            "next_state": torch.from_numpy(next_state_np).byte(),
+            "done": torch.tensor(done, dtype=torch.bool),
+            "td_error": torch.tensor(1.0, dtype=torch.float)
+        }, batch_size=[], device=self.cpu_device)
         
-        # Add to buffer
         self._replay_buffer.add(tensordict)
         self._current_size = min(self._current_size + 1, self.capacity)
 
     def push_batch(self, experiences):
         """
-        Add multiple experiences to the buffer at once - stored as uint8 on CPU.
-        Add each experience individually to ensure TorchRL compatibility.
-        
-        Args:
-            experiences: List of (state, action, reward, next_state, done) tuples
+        Add multiple experiences efficiently using batched insertion.
+        Automatically optimizes batch size based on input size.
         """
         if not experiences:
             return
+            
         
-        # Add each experience individually to ensure TorchRL consistency
-        for experience in experiences:
-            state, action, reward, next_state, done = experience
-            self.push(state, action, reward, next_state, done)
+        # Helper function to convert states
+        def to_numpy(obj):
+            if hasattr(obj, '__array__'):
+                return np.array(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj
+            else:
+                return np.array(obj)
+        
+        # Pre-allocate lists for this batch
+        batch_states = []
+        batch_actions = []
+        batch_rewards = []
+        batch_next_states = []
+        batch_dones = []
+        
+        # Process all experiences in the batch
+        for state, action, reward, next_state, done in experiences:
+            state_np = to_numpy(state)
+            next_state_np = to_numpy(next_state)
+            
+            # Ensure uint8 for memory efficiency
+            if state_np.dtype != np.uint8:
+                state_np = state_np.astype(np.uint8)
+            if next_state_np.dtype != np.uint8:
+                next_state_np = next_state_np.astype(np.uint8)
+            
+            batch_states.append(torch.from_numpy(state_np).byte())
+            batch_actions.append(torch.tensor(action, dtype=torch.long))
+            batch_rewards.append(torch.tensor(reward, dtype=torch.float))
+            batch_next_states.append(torch.from_numpy(next_state_np).byte())
+            batch_dones.append(torch.tensor(done, dtype=torch.bool))
+        
+        # Create batched TensorDict - single efficient insertion
+        batched_tensordict = TensorDict({
+            "state": torch.stack(batch_states, dim=0),
+            "action": torch.stack(batch_actions, dim=0), 
+            "reward": torch.stack(batch_rewards, dim=0),
+            "next_state": torch.stack(batch_next_states, dim=0),
+            "done": torch.stack(batch_dones, dim=0),
+            "td_error": torch.ones(batch_size, dtype=torch.float)  # Default priority
+        }, batch_size=[batch_size], device=self.cpu_device)
+        
+        # Single batched insertion - O(log n) complexity
+        self._replay_buffer.extend(batched_tensordict)
+        self._current_size = min(self._current_size + batch_size, self.capacity)
     
     def sample(self, batch_size):
         """Sample a batch from the buffer, convert uint8 to float32 only when sampling."""
@@ -301,16 +342,15 @@ class TorchRLPrioritizedReplayBuffer:
         self._sampler.beta = self.beta
         
         try:
-            # Create a new buffer instance with the desired batch size
-            temp_buffer = TensorDictReplayBuffer(
-                storage=self._storage,
-                sampler=self._sampler,
-                batch_size=batch_size,
-                priority_key="td_error"
-            )
+            # Update batch size for sampling
+            old_batch_size = self._replay_buffer._batch_size
+            self._replay_buffer._batch_size = batch_size
             
             # Sample from TorchRL buffer (still on CPU, still uint8)
-            sampled_tensordict = temp_buffer.sample()
+            sampled_tensordict = self._replay_buffer.sample()
+            
+            # Restore original batch size
+            self._replay_buffer._batch_size = old_batch_size
             
             # Convert uint8 states to float32 for training (on CPU first, then move to GPU)
             sampled_tensordict["state"] = sampled_tensordict["state"].float()
@@ -563,56 +603,53 @@ class EpsilonScheduler:
 
 class MarioAgent:
     def __init__(self, n_actions, lr=0.00025, gamma=0.9, epsilon=1.0,
-                 epsilon_min=0.02, epsilon_decay=0.001, memory_size=200000, batch_size=32):
+                 epsilon_min=0.02, epsilon_decay=0.001, memory_size=200000, batch_size=32,
+                 # Network architecture parameters
+                 use_dueling_network=True, stacked_frames=DEFAULT_STACKED_FRAMES, input_resolution=DEFAULT_DOWNSCALE_RESOLUTION,
+                 # Training parameters
+                 tau=0.05, lr_decay_rate=100, lr_decay_factor=0.9,
+                 # PER parameters
+                 per_alpha=0.8, per_beta=0.4, per_beta_increment=0.001,
+                 # Epsilon scheduler parameters
+                 fine_tune_threshold=5, fine_tune_decay=0.0001, fine_tune_min=0.01):
+        
         self.n_actions = n_actions
         self.gamma = gamma
         self.batch_size = batch_size
+        self.tau = tau
+        self.lr_decay_rate = lr_decay_rate
+        self.lr_decay_factor = lr_decay_factor
         
-        # Initialize epsilon scheduler with config parameters
+        # Initialize epsilon scheduler with provided parameters
         self.epsilon_scheduler = EpsilonScheduler(
             epsilon_start=epsilon,
             epsilon_min=epsilon_min,
             epsilon_decay=epsilon_decay,
-            fine_tune_threshold=EPSILON_FINE_TUNE_THRESHOLD,
-            fine_tune_decay=EPSILON_FINE_TUNE_DECAY,
-            fine_tune_min=EPSILON_FINE_TUNE_MIN
+            fine_tune_threshold=fine_tune_threshold,
+            fine_tune_decay=fine_tune_decay,
+            fine_tune_min=fine_tune_min
         )
 
-        # tau describes the percentage the target network gets nudged to the q-network each step
-        self.tau = AGENT_TAU
-
-        # Neural networks - choose between DQN and DuelingDQN based on config
-        # Networks will automatically use STACKED_FRAMES and DOWNSCALE_RESOLUTION from config
-        if USE_DUELING_NETWORK:
-            print(f"Using Dueling Network architecture ({STACKED_FRAMES} channels, {DOWNSCALE_RESOLUTION}x{DOWNSCALE_RESOLUTION} resolution)")
-            self.q_network = DuelingDQN(n_actions).to(DEVICE)
-            self.target_network = DuelingDQN(n_actions).to(DEVICE)
+        # Neural networks - choose between DQN and DuelingDQN based on parameter
+        if use_dueling_network:
+            print(f"Using Dueling Network architecture ({stacked_frames} channels, {input_resolution}x{input_resolution} resolution)")
+            self.q_network = DuelingDQN(n_actions, stacked_frames, input_resolution).to(DEVICE)
+            self.target_network = DuelingDQN(n_actions, stacked_frames, input_resolution).to(DEVICE)
         else:
-            print(f"Using standard DQN architecture ({STACKED_FRAMES} channels, {DOWNSCALE_RESOLUTION}x{DOWNSCALE_RESOLUTION} resolution)")
-            self.q_network = DQN(n_actions).to(DEVICE)
-            self.target_network = DQN(n_actions).to(DEVICE)
+            print(f"Using standard DQN architecture ({stacked_frames} channels, {input_resolution}x{input_resolution} resolution)")
+            self.q_network = DQN(n_actions, stacked_frames, input_resolution).to(DEVICE)
+            self.target_network = DQN(n_actions, stacked_frames, input_resolution).to(DEVICE)
         
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
-
         self.current_epoch = 0
 
-                # Experience replay - use TorchRL PrioritizedReplayBuffer if available
+        # Experience replay - use TorchRL PrioritizedReplayBuffer if available
         if TORCHRL_AVAILABLE:
             print("Using TorchRL PrioritizedReplayBuffer (Memory-Efficient uint8 storage)")
-            self.memory = TorchRLPrioritizedReplayBuffer(memory_size)
-            # Calculate memory savings using config parameters
-            uint8_gb = memory_size * (STACKED_FRAMES * DOWNSCALE_RESOLUTION * DOWNSCALE_RESOLUTION * 2) / (1024**3)  # 2 states per experience
-            float32_gb = uint8_gb * 4  # float32 is 4x larger than uint8
-            print(f"[MEMORY] Buffer will use ~{uint8_gb:.1f}GB instead of {float32_gb:.1f}GB")
-            print(f"[MEMORY] Saving {float32_gb - uint8_gb:.1f}GB (~{((float32_gb - uint8_gb) / float32_gb * 100):.0f}% reduction)")
+            self.memory = TorchRLPrioritizedReplayBuffer(memory_size, per_alpha, per_beta, per_beta_increment)
         else:
             print("Using StandardReplayBuffer (Memory-Efficient uint8 storage)")
             self.memory = StandardReplayBuffer(memory_size)
-            # Calculate memory savings using config parameters
-            uint8_gb = memory_size * (STACKED_FRAMES * DOWNSCALE_RESOLUTION * DOWNSCALE_RESOLUTION * 2) / (1024**3)  # 2 states per experience
-            float32_gb = uint8_gb * 4  # float32 is 4x larger than uint8
-            print(f"[MEMORY] Buffer will use ~{uint8_gb:.1f}GB instead of {float32_gb:.1f}GB")
-            print(f"[MEMORY] Saving {float32_gb - uint8_gb:.1f}GB (~{((float32_gb - uint8_gb) / float32_gb * 100):.0f}% reduction)")
 
     def act(self, state, epsilon_override=None):
         epsilon = self.epsilon_scheduler.get_epsilon()
@@ -627,6 +664,9 @@ class MarioAgent:
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.push(state, action, reward, next_state, done)
+
+    def remember_batch(self, experiences):
+        self.memory.push_batch(experiences)
     
     def update_flag_completions(self, flag_completions):
         """Update the epsilon scheduler with the current number of flag completions."""
@@ -641,7 +681,7 @@ class MarioAgent:
         """Get detailed information about epsilon scheduler state."""
         return self.epsilon_scheduler.get_phase_info()
 
-    def replay(self, batch_size=32, episodes=1):
+    def replay(self, batch_size=32, episodes=1, memory_lock=None):
         # If we don't have enough collected memories for a single batch, we skip training
         if len(self.memory) < batch_size:
             return 0.0, 0.0, 0.0, 0.0  # Return default values instead of None
@@ -654,7 +694,12 @@ class MarioAgent:
 
         for _ in range(episodes):
             # Sample batch - now returns TensorDict or tuple depending on buffer type
-            batch = self.memory.sample(batch_size)
+            if memory_lock:
+                with memory_lock:
+                    batch = self.memory.sample(batch_size)
+            else:
+                batch = self.memory.sample(batch_size)
+            
             if batch is None:
                 continue
 
@@ -666,8 +711,6 @@ class MarioAgent:
                 rewards = batch["reward"]  # type: ignore
                 next_states = batch["next_state"]  # type: ignore
                 dones = batch["done"]  # type: ignore
-                
-
                 
                 # Get indices and weights for priority updates
                 indices = batch.get("index", None)  # type: ignore
@@ -740,7 +783,11 @@ class MarioAgent:
 
             # Update priorities based on TD errors only if using prioritized replay
             if indices is not None:
-                self.memory.update_priorities(indices, td_errors + 1e-6)  # Add small constant to avoid zero priorities
+                if memory_lock:
+                    with memory_lock:
+                        self.memory.update_priorities(indices, td_errors + 1e-6)  # Add small constant to avoid zero priorities
+                else:
+                    self.memory.update_priorities(indices, td_errors + 1e-6)  # Add small constant to avoid zero priorities
 
             # Instead of doing hard target network updates we use this polyac averaging at each step to get more stable results
             q_network_params = self.q_network.parameters()
@@ -755,17 +802,10 @@ class MarioAgent:
 
         avg_reward = total_reward / episodes
 
-        if self.current_epoch != 0 and self.current_epoch % LR_DECAY_RATE == 0:
-            self.optimizer.param_groups[0]['lr'] *= LR_DECAY_FACTOR
+        if self.current_epoch != 0 and self.current_epoch % self.lr_decay_rate == 0:
+            self.optimizer.param_groups[0]['lr'] *= self.lr_decay_factor
 
-        # Print current learning rate
         current_lr = self.optimizer.param_groups[0]['lr']
-        print(f"[AGENT] Current learning rate: {current_lr}")
-
-        # Print average gradient norm across all batches
-        if processed_batches > 0:
-            avg_gradient_norm = total_gradient_norm / processed_batches
-            print(f"[AGENT] Average Gradient Norm: {avg_gradient_norm}")
 
         self.current_epoch += 1
         return current_lr, avg_reward, returned_loss, returned_td_error
