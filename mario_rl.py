@@ -2,7 +2,7 @@ from multiprocessing import Process, Queue, Event, Lock, Value
 from queue import Empty, Full
 import time
 from environment import create_env_new
-from dqn_agent import DuelingDQN, MarioAgent
+from dqn_agent import DQN, DuelingDQN, MarioAgent, DEVICE
 from time import sleep
 import signal
 import torch
@@ -11,7 +11,7 @@ from tensorboard_logger import create_logger
 from collections import deque
 from mario_rl_common import save_checkpoint, load_checkpoint, find_latest_checkpoint
 
-EXPERIMENT_NAME = "test_4"
+EXPERIMENT_NAME = "test_5"
 
 AGENT_FOLDER = "checkpoints"
 
@@ -45,7 +45,7 @@ REUSE_FACTOR = 10
 
 # Network Architecture Parameters
 USE_DUELING_NETWORK = True
-STACKED_FRAMES = 3
+STACKED_FRAMES = 4
 DOWNSCALE_RESOLUTION = 128
 
 # Training Parameters  
@@ -89,7 +89,12 @@ def create_env():
 class CollectorProcess(Process):
     def __init__(self, id, replay_chunk_queue, model_queue, logging_queue, close_event, epoch, total_flag_completions):
         Process.__init__(self)
-        self.model = DuelingDQN(n_actions=len(USED_MOVESET))
+        # Create model with correct parameters from mario_rl.py
+        if USE_DUELING_NETWORK:
+            self.model = DuelingDQN(n_actions=len(USED_MOVESET), stacked_frames=STACKED_FRAMES, input_resolution=DOWNSCALE_RESOLUTION).to(DEVICE)
+        else:
+            self.model = DQN(n_actions=len(USED_MOVESET), stacked_frames=STACKED_FRAMES, input_resolution=DOWNSCALE_RESOLUTION).to(DEVICE)
+        
         self.replay_chunk_queue = replay_chunk_queue
         self.model_queue = model_queue
         self.logging_queue = logging_queue
@@ -162,7 +167,7 @@ class CollectorProcess(Process):
         if np.random.random() < self.epsilon:
             action = np.random.randint(0, len(USED_MOVESET))
         else:
-            state_tensor = torch.FloatTensor(np.array(self.state)).unsqueeze(0).to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            state_tensor = torch.FloatTensor(np.array(self.state)).unsqueeze(0).to(DEVICE)
             with torch.no_grad():
                 action = self.model(state_tensor).argmax().item()
         
@@ -239,7 +244,6 @@ class TrainingProcess(Process):
                 chunk = self.replay_chunk_queue.get(timeout=1)
                 self.agent.remember_batch(chunk)
                 memories_per_epoch += len(chunk)
-                print(f"[TRAINING] stored chunk of {len(chunk)} experiences")
             except Empty:
                 print(f"[TRAINING] waiting for enough experiences: {memories_per_epoch} / {CONSUMED_EXP / REUSE_FACTOR}")
                 # Continue to check close_event

@@ -325,12 +325,12 @@ class TorchRLPrioritizedReplayBuffer:
             "reward": torch.stack(batch_rewards, dim=0),
             "next_state": torch.stack(batch_next_states, dim=0),
             "done": torch.stack(batch_dones, dim=0),
-            "td_error": torch.ones(batch_size, dtype=torch.float)  # Default priority
-        }, batch_size=[batch_size], device=self.cpu_device)
+            "td_error": torch.ones(len(experiences), dtype=torch.float)  # Default priority
+        }, batch_size=[len(experiences)], device=self.cpu_device)
         
         # Single batched insertion - O(log n) complexity
         self._replay_buffer.extend(batched_tensordict)
-        self._current_size = min(self._current_size + batch_size, self.capacity)
+        self._current_size = min(self._current_size + len(experiences), self.capacity)
     
     def sample(self, batch_size):
         """Sample a batch from the buffer, convert uint8 to float32 only when sampling."""
