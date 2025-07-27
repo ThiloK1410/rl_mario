@@ -3,7 +3,7 @@ from time import sleep
 import torch
 
 from dqn_agent import MarioAgent
-from environment import create_env
+from environment import create_env_new
 from mario_rl_common import find_latest_checkpoint, load_checkpoint, list_available_experiments
 from config import AGENT_FOLDER
 
@@ -11,7 +11,7 @@ import numpy as np
 
 # by thilo
 def main():
-    env = create_env()
+    env = create_env_new()
     agent = MarioAgent(env.action_space.n)  # type: ignore
     
     # Show available experiments

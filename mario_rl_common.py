@@ -272,6 +272,11 @@ def log_training_metrics(tb_logger, agent, epoch, metrics, epoch_duration, prefi
     # Get epsilon scheduler information
     epsilon_info = agent.get_epsilon_info()
     
+    # Calculate curriculum learning metric: avg_level_start_distance / best_level_start_distance
+    curriculum_ratio = 0.0
+    if metrics['best_level_start_distance'] > 0 and metrics['avg_level_start_distance'] > 0:
+        curriculum_ratio = metrics['avg_level_start_distance'] / metrics['best_level_start_distance']
+    
     # Log comprehensive metrics to TensorBoard
     tb_metrics = {
         'Training/Loss': metrics['loss'],
@@ -286,6 +291,7 @@ def log_training_metrics(tb_logger, agent, epoch, metrics, epoch_duration, prefi
         'Performance/Recorded_Start_Episodes': metrics['recorded_start_episodes'],
         'Performance/Flag_Completions': metrics['flag_completions'],
         'Performance/Flag_Completion_Rate': metrics['flag_completion_rate'],
+        'Curriculum/Average_Distance_Ratio': curriculum_ratio,  # avg_distance / max_distance for curriculum tracking
         'Hyperparameters/Learning_Rate': metrics['lr'],
         'Hyperparameters/Epsilon': agent.epsilon,
         'Hyperparameters/Epsilon_Phase': 1 if epsilon_info['phase'] == 'Regular' else 2,

@@ -50,7 +50,7 @@ SKIPPED_FRAMES = 4
 # sparsity for frame stacking, only used in create_env_new()
 SPARSE_FRAME_INTERVAL = 4
 
-USED_MOVESET = COMPLEX_MOVEMENT
+USED_MOVESET = SIMPLE_MOVEMENT
 
 # ----------------------------------------------------------------------------------------------------------------------
 # SAMPLE CONTROL
@@ -61,11 +61,11 @@ USED_MOVESET = COMPLEX_MOVEMENT
 BUFFER_SIZE = 100000
 
 # The batch size for the agents policy training
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 
 # Minimum number of experiences to collect before starting training
 # Must be >= BATCH_SIZE to ensure we can sample batches
-MIN_BUFFER_SIZE = 10000
+MIN_BUFFER_SIZE = 20000
 
 # Validate that MIN_BUFFER_SIZE is at least BATCH_SIZE
 if MIN_BUFFER_SIZE < BATCH_SIZE:
@@ -73,10 +73,10 @@ if MIN_BUFFER_SIZE < BATCH_SIZE:
 
 # controls how much experiences needs to be collected before we can start the next epoch
 # exp_collected = (BATCH_SIZE * EPISODES_PER_EPOCH) / REUSE_FACTOR
-REUSE_FACTOR = 10.0
+REUSE_FACTOR = 60.0
 
 # The amount of batches we train per epoch
-EPISODES_PER_EPOCH = 8
+EPISODES_PER_EPOCH = 16
 
 # On how many epochs we want to train, this is basically forever
 NUM_EPOCHS = 20000
@@ -92,10 +92,10 @@ MAX_STEPS_PER_RUN = 0
 LEARNING_RATE = 0.001
 
 # Learning rate decay factor
-LR_DECAY_FACTOR = 0.9
+LR_DECAY_FACTOR = 0.95
 
 # Learning rate decay rate
-LR_DECAY_RATE = 100
+LR_DECAY_RATE = 50
 
 # Initial epsilon value for epsilon-greedy exploration
 EPSILON_START = 0.9
@@ -152,7 +152,7 @@ ITEM_REWARD_FACTOR = 0.0
 SCORE_REWARD_FACTOR = 0.00
 
 # tau describes the percentage of how much the target networks aligns with the dqn each step
-AGENT_TAU = 0.05
+AGENT_TAU = 0.005
 
 # Whether to use Dueling Network architecture instead of standard DQN
 # Dueling Network separates value and advantage estimation for better performance
@@ -166,7 +166,7 @@ USE_DUELING_NETWORK = True
 # alpha = 0: uniform random sampling (no prioritization)
 # alpha = 1: full prioritization based on TD error
 # Typical values: 0.6-0.7 for good balance between exploration and exploitation
-PER_ALPHA = 0.8
+PER_ALPHA = 0.7
 
 # PER beta parameter - controls importance sampling correction
 # beta = 0: no correction for bias introduced by prioritization
